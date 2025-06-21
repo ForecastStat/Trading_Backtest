@@ -1,0 +1,90 @@
+# Nome del workflow, visibile nella sezione "Actions" di GitHub
+name: Run Algorithmic Trading Backtest
+
+# Eventi che attivano questo workflow
+on:
+  # 1. Attivazione manuale: permette di avviare il backtest la prima volta
+  workflow_dispatch:
+
+  # 2. Attivazione automatica: si riattiva da solo quando vengono committati i file di stato
+  push:
+    branches:
+      - main  # O master, a seconda del nome del tuo branch principale
+    paths:
+      # Esegui solo se i file dentro 'data_backtest' vengono modificati
+      - 'data_backtest/**'
+
+jobs:
+  # Unico job del workflow
+  backtest-chunk:
+    # Nome del job
+    runs-on: ubuntu-latest # Usa l'ultima versione di Linux disponibile su GitHub
+
+    # Permessi necessari per permettere al job di fare commit sul repository
+    permissions:
+      contents: write
+
+    # Passi che verranno eseguiti in sequenza
+    steps:
+      # Passo 1: Scarica il codice del tuo repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Passo 2: Imposta l'ambiente Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10' # Usa una versione stabile di Python
+
+      # Passo 3: Installa tutte le librerie necessarie
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas yfinance requests yfinance pandas_ta finvizfinance beautifulsoup4 urllib3 certifi vaderSentiment scikit-learn
+
+      # Passo 4: Esegui UN BLOCCO del backtest
+      - name: Run a chunk of the backtest
+        id: run_script # Diamo un ID a questo passo per poter controllare il suo risultato
+        # Il comando 'python backtester.py || true' assicura che il workflow non fallisca
+        # se lo script restituisce 'False' (cioè quando il backtest è finito)
+        run: python backtester.py || true
+
+      # Passo 5: Controlla se il backtest è terminato
+      - name: Check if backtest is complete
+        id: check_completion
+        run: |
+          # Leggiamo l'ultima data simulata dal file di stato
+          last_date=$(jq -r .last_simulated_date data_backtest/trading_state.json)
+          echo "Ultima data simulata: $last_date"
+          # Se l'ultima data è uguale o successiva alla nostra data di fine, il backtest è finito
+          if [[ "$last_date" > "2024-12-30" || "$last_date" == "null" ]]; then
+            echo "BACKTEST_COMPLETE=true" >> $GITHUB_ENV
+            echo "Backtest completato!"
+          else
+            echo "BACKTEST_COMPLETE=false" >> $GITHUB_ENV
+            echo "Il backtest deve continuare."
+          fi
+
+      # Passo 6: Salva i risultati (fa il commit e push) solo se il backtest NON è completo
+      - name: Commit and push results
+        # Esegui questo passo solo se la variabile d'ambiente non indica che il backtest è finito
+        if: env.BACKTEST_COMPLETE == 'false'
+        run: |
+          # Configura Git con un utente "bot"
+          git config --global user.name 'GitHub Actions Bot'
+          git config --global user.email 'actions-bot@github.com'
+          
+          # Aggiungi tutti i file modificati nella cartella del backtest
+          git add data_backtest/*
+          
+          # Crea un messaggio di commit dinamico con l'ultima data simulata
+          LAST_DATE=$(jq -r .last_simulated_date data_backtest/trading_state.json)
+          git commit -m "Backtest progress: completed up to $LAST_DATE" || echo "Nessuna modifica da committare."
+          
+          # Invia le modifiche al repository. Questo scatenerà un nuovo run del workflow!
+          git push
+
+      # Passo 7: Messaggio finale se il backtest è concluso
+      - name: Final completion message
+        if: env.BACKTEST_COMPLETE == 'true'
+        run: echo "🎉🎉🎉 L'intero processo di backtest è stato completato! 🎉🎉🎉"
