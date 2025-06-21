@@ -13,6 +13,16 @@ warnings.filterwarnings('ignore') # Mantieni per sopprimere warning comuni come 
 from finvizfinance.screener.overview import Overview
 import traceback
 
+# --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
+import os
+from datetime import datetime
+def get_current_date():
+    simulated_date_str = os.environ.get('SIMULATED_DATE')
+    if simulated_date_str:
+        return datetime.strptime(simulated_date_str, '%Y-%m-%d')
+    return datetime.now()
+# --- FINE BLOCCO MODIFICA PER BACKTEST ---
+
 # --- Funzione helper per Finviz: convert_market_cap_original_robust ---
 def convert_market_cap_original_robust(val):
     """Versione robusta della tua funzione originale convert_market_cap."""
@@ -204,9 +214,10 @@ class EnhancedBestBuySelector:
     def get_market_regime(self):
         """Determina il regime di mercato attuale"""
         try:
+            simulated_end_date = get_current_date()
             # Increased period for more robust MA calculation
-            spy_data = yf.download('SPY', period='2y', interval='1d', progress=False)
-            vix_data = yf.download('^VIX', period='1y', interval='1d', progress=False)
+            spy_data = yf.download('SPY', end=simulated_end_date, period='2y', interval='1d', progress=False)
+            vix_data = yf.download('^VIX', end=simulated_end_date, period='1y', interval='1d', progress=False)
             
             if spy_data.empty or vix_data.empty:
                 print("DEBUG: SPY or VIX data is empty for market regime analysis. Returning neutral.")
@@ -332,7 +343,8 @@ class EnhancedBestBuySelector:
     def calculate_technical_score(self, ticker):
         """Calcola technical score"""
         try:
-            data = yf.download(ticker, period='6mo', interval='1d', progress=False)
+            simulated_end_date = get_current_date()
+            data = yf.download(ticker, end=simulated_end_date, period='6mo', interval='1d', progress=False)
             
             if data.empty: return 0
             
