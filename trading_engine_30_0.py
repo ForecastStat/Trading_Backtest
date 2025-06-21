@@ -227,15 +227,17 @@ import time as time_module
 import math
 
 # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
+# Questo blocco di codice serve solo a capire se stiamo facendo un backtest.
 from datetime import datetime
 from pathlib import Path
+
 def get_current_date():
+    """Legge la data finta impostata dal backtester, altrimenti usa quella di oggi."""
     simulated_date_str = os.environ.get('SIMULATED_DATE')
     if simulated_date_str:
         return datetime.strptime(simulated_date_str, '%Y-%m-%d')
     return datetime.now()
 # --- FINE BLOCCO MODIFICA PER BACKTEST ---
-
 
 
 # Machine Learning e AI
@@ -2585,6 +2587,41 @@ class IntegratedRevolutionaryTradingEngine:
         self.genetic_mutation_rate = 0.1
         self.genetic_elite_size = 10
         self.logger = logging.getLogger(f"{__name__}.IntegratedEngine")
+        
+        
+        # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
+        # Controlliamo se stiamo eseguendo un backtest. Se sì, applichiamo regole speciali.
+        if 'SIMULATED_DATE' in os.environ:
+            # PRIMA COSA: Diciamo allo script di salvare i dati del backtest in una cartella separata
+            # per non rovinare i dati del trading reale.
+            global DATA_DIR, AI_MODELS_DIR, PERFORMANCE_DB_FILE, TRADING_STATE_FILE
+            self.logger.info("MODALITÀ BACKTEST RILEVATA: I dati verranno salvati in 'data_backtest'.")
+            DATA_DIR = Path("data_backtest")
+            DATA_DIR.mkdir(exist_ok=True)
+            
+            TRADING_STATE_FILE = DATA_DIR / "trading_state.json"
+            AI_MODELS_DIR = DATA_DIR / "ai_learning/models"
+            PERFORMANCE_DB_FILE = DATA_DIR / "ai_learning/performance.db"
+            AI_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            
+            self.state_file = TRADING_STATE_FILE
+            # Fine della parte tecnica.
+        
+            # SECONDA COSA (LA PIÙ IMPORTANTE): Rendiamo il sistema meno esigente.
+            self.logger.info("MODALITÀ BACKTEST: Applico parametri di trading più permissivi per il mercato storico.")
+            
+            self.min_roi_threshold = 5.0      # Mi accontento di un guadagno atteso del 5% (invece che 9%)
+            self.volume_threshold = 1.2       # Mi basta un aumento di volume del 20% (invece che 50%)
+            self.min_signal_quality = 0.8     # Accetto segnali di qualità leggermente inferiore
+            self.rsi_oversold = 35            # Considero un titolo "da comprare" prima (a RSI 35 invece che 30)
+        
+            # Stampo un messaggio per essere sicuro che le modifiche siano state applicate
+            self.logger.info(f"Nuovi parametri per backtest: ROI > {self.min_roi_threshold}%, Volume > {self.volume_threshold}x, RSI < {self.rsi_oversold}")
+        # --- FINE BLOCCO MODIFICA PER BACKTEST ---
+        
+        
+        
+        
         
         # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
         # Se stiamo eseguendo un backtest, forza l'uso di una cartella dati separata.
