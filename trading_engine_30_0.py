@@ -1,3 +1,12 @@
+# --- INIZIO BLOCCO PATCH NUMPY 2.0 ---
+try:
+    import numpy as np
+    if not hasattr(np, 'NaN'):
+        np.NaN = np.nan
+except ImportError:
+    pass
+# --- FINE BLOCCO PATCH NUMPY 2.0 ---
+
 # === COMPREHENSIVE DEPENDENCY FIX (GITHUB ACTIONS) ===
 import os
 import sys
@@ -218,12 +227,15 @@ import time as time_module
 import math
 
 # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
+from datetime import datetime
+from pathlib import Path
 def get_current_date():
     simulated_date_str = os.environ.get('SIMULATED_DATE')
     if simulated_date_str:
         return datetime.strptime(simulated_date_str, '%Y-%m-%d')
     return datetime.now()
 # --- FINE BLOCCO MODIFICA PER BACKTEST ---
+
 
 
 # Machine Learning e AI
