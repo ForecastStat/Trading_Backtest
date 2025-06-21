@@ -40,7 +40,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas yfinance requests yfinance pandas_ta finvizfinance beautifulsoup4 urllib3 certifi vaderSentiment scikit-learn
+          # Fissiamo la versione di numpy a < 2.0 per garantire la compatibilità con pandas_ta
+          pip install "numpy<2.0" pandas yfinance requests pandas_ta finvizfinance beautifulsoup4 urllib3 certifi vaderSentiment scikit-learn
 
       # Passo 4: Esegui UN BLOCCO del backtest
       - name: Run a chunk of the backtest
