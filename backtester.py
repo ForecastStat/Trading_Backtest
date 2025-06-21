@@ -1,3 +1,4 @@
+# Contenuto completo di backtester.py (assicurati che sia questo)
 import os
 import subprocess
 import json
@@ -11,19 +12,12 @@ import time
 START_DATE_STR = "2010-01-01"
 END_DATE_STR = "2024-12-31"
 INITIAL_CAPITAL = 100000.0
+MAX_DAYS_PER_RUN = 90
 
-# --- NUOVO: Parametro per GitHub Actions ---
-# Simula al massimo questo numero di giorni di trading per ogni esecuzione del workflow
-# 90 giorni di trading sono circa 4-5 mesi reali. È un buon valore per stare sotto i limiti.
-MAX_DAYS_PER_RUN = 90 
-
-# Usiamo una cartella separata per isolare tutto il backtest
 BACKTEST_DATA_DIR = "data_backtest"
 BACKTEST_STATE_FILE = os.path.join(BACKTEST_DATA_DIR, "trading_state.json")
 PORTFOLIO_HISTORY_FILE = os.path.join(BACKTEST_DATA_DIR, "portfolio_evolution.json")
 EXECUTION_SIGNALS_FILE = os.path.join(BACKTEST_DATA_DIR, "execution_signals.json")
-
-# (Le funzioni initialize_backtest, simulate_broker, update_portfolio_history rimangono IDENTICHE a prima, le riporto per completezza)
 
 def initialize_backtest():
     os.makedirs(BACKTEST_DATA_DIR, exist_ok=True)
@@ -112,9 +106,7 @@ def update_portfolio_history(date, state, portfolio_history):
 
 
 def run_backtest_chunk():
-    """ MODIFICATO: Esegue un "blocco" di backtest e poi si ferma. """
     initialize_backtest()
-    
     with open(BACKTEST_STATE_FILE, 'r') as f: state = json.load(f)
     with open(PORTFOLIO_HISTORY_FILE, 'r') as f: portfolio_history = json.load(f)
         
@@ -124,15 +116,14 @@ def run_backtest_chunk():
 
     if start_date > end_date:
         print("🎉🎉🎉 BACKTEST COMPLETATO! 🎉🎉🎉")
-        print(f"La data di inizio ({start_date.strftime('%Y-%m-%d')}) è successiva alla data di fine.")
-        return False # Segnala che il backtest è finito
+        return False
 
     trading_days = pd.bdate_range(start=start_date, end=end_date)
     days_processed = 0
     
     for day in trading_days:
         if days_processed >= MAX_DAYS_PER_RUN:
-            print(f"\n--- Raggiunto limite di {MAX_DAYS_PER_RUN} giorni per questa esecuzione. Il workflow si fermerà e ripartirà. ---")
+            print(f"\n--- Raggiunto limite di {MAX_DAYS_PER_RUN} giorni per questa esecuzione. ---")
             break
 
         day_dt = day.to_pydatetime()
@@ -141,32 +132,37 @@ def run_backtest_chunk():
         print(f"\n--- Simulazione {date_str} ({days_processed + 1}/{MAX_DAYS_PER_RUN} di questo blocco) ---")
         os.environ['SIMULATED_DATE'] = date_str
         
-        try:
-            # Esegui la pipeline
-            subprocess.run(["python", "best_buy.py"], capture_output=True, check=True)
-            subprocess.run(["python", "stock_analyzer_2_0.py"], capture_output=True, check=True)
-            subprocess.run(["python", "trading_engine_30_0.py"], capture_output=True, check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"ERRORE durante l'esecuzione di uno script per il giorno {date_str}: {e}")
-            print("Output dello script fallito:", e.stdout)
-            print("Errore dello script fallito:", e.stderr)
-            # Potresti decidere di fermare il backtest qui o di saltare il giorno
-            continue # Saltiamo il giorno e proviamo il successivo
+        # Esegui la pipeline passo dopo passo per un debug migliore
+        print("  - [1/3] Esecuzione Best Buy Selector...")
+        result_bb = subprocess.run(["python", "best_buy.py"], capture_output=True, text=True)
+        if result_bb.returncode != 0:
+            print(f"  -> ERRORE in best_buy.py. Salto il giorno. Errore: {result_bb.stderr}")
+            continue
 
+        print("  - [2/3] Esecuzione Stock Analyzer...")
+        result_sa = subprocess.run(["python", "stock_analyzer_2_0.py"], capture_output=True, text=True)
+        if result_sa.returncode != 0:
+            print(f"  -> ERRORE in stock_analyzer_2_0.py. Salto il giorno. Errore: {result_sa.stderr}")
+            continue
+
+        print("  - [3/3] Esecuzione Trading Engine...")
+        result_te = subprocess.run(["python", "trading_engine_30_0.py"], capture_output=True, text=True)
+        if result_te.returncode != 0:
+            print(f"  -> ERRORE in trading_engine_30_0.py. Salto il giorno. Errore: {result_te.stderr}")
+            continue
+        
+        print("  - Simulando il broker...")
         state = simulate_broker(day_dt, state)
         portfolio_history = update_portfolio_history(day_dt, state, portfolio_history)
         
-        # Aggiorna la data dell'ultimo giorno simulato con successo
         state["last_simulated_date"] = date_str
         days_processed += 1
 
-    # Salvataggio finale dello stato e della cronologia alla fine del blocco
     print("\n--- Blocco di simulazione completato. Salvataggio progressi... ---")
     with open(BACKTEST_STATE_FILE, 'w') as f: json.dump(state, f, indent=2)
     with open(PORTFOLIO_HISTORY_FILE, 'w') as f: json.dump(portfolio_history, f, indent=2)
-    
     print("Salvataggio completato.")
-    return True # Segnala che il backtest deve continuare
+    return True
 
 if __name__ == "__main__":
     run_backtest_chunk()
