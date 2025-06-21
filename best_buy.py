@@ -14,6 +14,7 @@ from finvizfinance.screener.overview import Overview
 import traceback
 
 # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
+# --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
 import os
 from datetime import datetime
 def get_current_date():
