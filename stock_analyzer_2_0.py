@@ -17,12 +17,26 @@ import traceback
 from finvizfinance.screener.overview import Overview as FinvizOverview
 
 # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
+# --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
+import os
+from datetime import datetime
 def get_current_date():
     simulated_date_str = os.environ.get('SIMULATED_DATE')
     if simulated_date_str:
         return datetime.strptime(simulated_date_str, '%Y-%m-%d')
     return datetime.now()
+    
+def is_backtest_mode():
+    return 'SIMULATED_DATE' in os.environ
+
+BACKTEST_TICKER_UNIVERSE = [
+    'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'JNJ', 'WMT', 'JPM', 'PG', 'XOM', 'CVX', 
+    'UNH', 'HD', 'BAC', 'KO', 'PFE', 'VZ', 'DIS', 'CSCO', 'PEP', 'INTC',
+    'MCD', 'T', 'BA', 'IBM', 'CAT', 'GE', 'MMM', 'HON', 'AXP', 'NKE',
+    'GS', 'MRK', 'ORCL', 'UPS', 'LMT', 'COST', 'SBUX', 'SPY', 'QQQ', 'IWM'
+]
 # --- FINE BLOCCO MODIFICA PER BACKTEST ---
+
 
 # Configurazione SSL avanzata con certificati aggiornati
 ctx = create_urllib3_context()
@@ -206,7 +220,39 @@ class StockAnalyzer:
         self.final_output_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Sentiment', 'Ticker']
 
     def get_top_gainers(self, n=10, cp_threshold=5, vol_threshold=1e6,
-                        price_lower=5, price_upper=200, mcap_lower=1e9, mcap_upper=5e10):
+                    price_lower=5, price_upper=200, mcap_lower=1e9, mcap_upper=5e10):
+        """
+        MODIFICATA PER BACKTEST: In modalità backtest, simula i gainers usando dati storici.
+        In modalità live, usa l'API di Yahoo.
+        """
+        if is_backtest_mode():
+            print("  [BACKTEST MODE] get_top_gainers: Simulo screener su dati storici.")
+            simulated_date = get_current_date()
+            gainers = []
+            for ticker in BACKTEST_TICKER_UNIVERSE:
+                try:
+                    # Scarica gli ultimi 2 giorni di dati per calcolare la variazione
+                    data = yf.download(ticker, end=simulated_date, period='2d', interval='1d', progress=False)
+                    if data is None or len(data) < 2:
+                        continue
+                    
+                    last_day = data.iloc[-1]
+                    prev_day = data.iloc[-2]
+                    
+                    cp = ((last_day['Close'] / prev_day['Close']) - 1) * 100
+                    vol = last_day['Volume']
+                    price = last_day['Close']
+    
+                    if cp > cp_threshold and vol > vol_threshold and price_lower < price < price_upper:
+                        gainers.append({'ticker': ticker, 'cp': cp})
+                except Exception:
+                    continue
+            
+            # Ordina per performance e restituisci i migliori
+            sorted_gainers = sorted(gainers, key=lambda x: x['cp'], reverse=True)
+            return [g['ticker'] for g in sorted_gainers[:n]]
+    
+        # --- Il tuo codice originale rimane qui ---
         filtered_symbols = []
         try:
             response = self.session.get(
@@ -216,34 +262,12 @@ class StockAnalyzer:
             )
             response.raise_for_status() 
             data = response.json()
-            results = data.get('finance', {}).get('result', [])
-            if not results:
-                return filtered_symbols
-
-            quotes = results[0].get('quotes', [])
-            if not quotes:
-                return filtered_symbols
-
+            # ... (il resto del tuo codice originale) ...
+            # ... (tutta la logica di parsing del JSON) ...
+            # ...
             for quote in quotes:
                 try:
-                    cp = quote.get('regularMarketChangePercent')
-                    if isinstance(cp, dict) and 'raw' in cp: cp = cp['raw']
-                    else: cp = float(cp) if cp is not None else 0
-
-                    vol = quote.get('regularMarketVolume')
-                    if isinstance(vol, dict) and 'raw' in vol: vol = vol['raw']
-                    else: vol = float(vol) if vol is not None else 0
-
-                    price = quote.get('regularMarketPrice')
-                    if isinstance(price, dict) and 'raw' in price: price = price['raw']
-                    else: price = float(price) if price is not None else 0
-
-                    mcap = quote.get('marketCap')
-                    if isinstance(mcap, dict) and 'raw' in mcap: mcap = mcap['raw']
-                    else: mcap = parse_market_cap(mcap) 
-
-                    symbol = quote.get('symbol')
-
+                    # ... (il tuo codice di parsing) ...
                     if (symbol and isinstance(symbol, str) and
                         cp > cp_threshold and
                         vol > vol_threshold and
@@ -255,7 +279,7 @@ class StockAnalyzer:
             return filtered_symbols[:n]
         except (requests.exceptions.RequestException, ValueError, json.JSONDecodeError) as e:
             print(f"❌ Errore recupero Day Gainers: {e}")
-            return filtered_symbols 
+            return filtered_symbols
 
     def get_news_sentiment(self, ticker):
         try:
@@ -383,11 +407,14 @@ class StockAnalyzer:
 
     def get_finviz_screened_tickers(self, n_fallback=50, min_market_cap_str='+Mid (over $2bln)', min_avg_volume_str='Over 500K', min_price_str='Over $5'):
         """
-        Ottiene una lista di titoli USA da Finviz, filtrati per liquidità, market cap e prezzo.
-        Questo serve come lista base per altre strategie di screening.
-        CORRETTO: 'Market Cap.' da 'Mid (over $2bln)' a '+Mid (over $2bln)'
-        CORRETTO: 'Avg Volume' a 'Average Volume'
+        MODIFICATA PER BACKTEST: In modalità backtest, restituisce semplicemente l'universo statico.
+        In modalità live, usa Finviz.
         """
+        if is_backtest_mode():
+            print("  [BACKTEST MODE] get_finviz_screened_tickers: Restituisco l'universo di ticker statico.")
+            return BACKTEST_TICKER_UNIVERSE
+        
+        # --- Il tuo codice originale rimane qui ---
         print(f"  Recupero titoli da Finviz per scansione base...")
         try:
             foverview = FinvizOverview()
@@ -395,15 +422,15 @@ class StockAnalyzer:
             filters_dict = {
                 'Country': 'USA', 
                 'Market Cap.': f'{min_market_cap_str}', 
-                'Average Volume': min_avg_volume_str,       # Corretto nome filtro
+                'Average Volume': min_avg_volume_str,
                 'Price': min_price_str                  
             }
             print(f"  Applicazione filtri Finviz: {filters_dict}")
             foverview.set_filter(filters_dict=filters_dict)
             
             df = foverview.screener_view(order='Market Cap.', ascend=False, verbose=0) 
-            time.sleep(3) # Aumento delay dopo ogni screener_view
-
+            time.sleep(3)
+    
             if df is not None and not df.empty and 'Ticker' in df.columns:
                 symbols = df['Ticker'].tolist()
                 symbols = list(set([s for s in symbols if isinstance(s, str) and s.strip() and '.' not in s and len(s) <= 5]))
@@ -547,6 +574,13 @@ class StockAnalyzer:
             return self.fallback_tickers[:n]
         
     def get_valuation_anomalies(self, n=10):
+        
+        if is_backtest_mode():
+            print(f"  [BACKTEST MODE] {self.get_valuation_anomalies.__name__}: Funzione disabilitata, restituisco lista vuota.")
+            # Durante il backtest, non possiamo ottenere dati fondamentali storici da Finviz.
+            # Restituire una lista vuota è il comportamento più sicuro.
+            return []
+        
         """
         Trova titoli con disconnessione prezzo/valore (PERLE RARE - Potenziato)
         Rimosso Return on Equity e Operating Margin a causa di problemi con i filtri
@@ -647,6 +681,15 @@ class StockAnalyzer:
         return breakout_candidates
     
     def get_institutional_flow_candidates(self, n=10):
+        
+        
+        if is_backtest_mode():
+            print(f"  [BACKTEST MODE] {self.get_valuation_anomalies.__name__}: Funzione disabilitata, restituisco lista vuota.")
+            # Durante il backtest, non possiamo ottenere dati fondamentali storici da Finviz.
+            # Restituire una lista vuota è il comportamento più sicuro.
+            return []
+        
+        
         """
         Identifica titoli con flussi istituzionali positivi (PERLE RARE)
         CORRETTO: 'Institutional Ownership' a 'InstitutionalOwnership'
@@ -677,6 +720,14 @@ class StockAnalyzer:
             return []
 
     def get_insider_buying_candidates(self, n=10):
+        
+        if is_backtest_mode():
+            print(f"  [BACKTEST MODE] {self.get_valuation_anomalies.__name__}: Funzione disabilitata, restituisco lista vuota.")
+            # Durante il backtest, non possiamo ottenere dati fondamentali storici da Finviz.
+            # Restituire una lista vuota è il comportamento più sicuro.
+            return []
+        
+        
         """
         NUOVO: Identifica titoli con acquisti recenti significativi da insider (PERLE RARE - Segnale Forte)
         CORRETTO: 'Insider Trading' a 'InsiderTransactions' e opzione 'Recent Buying' a 'Positive (>0%)'
@@ -705,6 +756,14 @@ class StockAnalyzer:
             return []
 
     def get_analyst_upgrades_candidates(self, n=10):
+        
+        
+        if is_backtest_mode():
+            print(f"  [BACKTEST MODE] {self.get_valuation_anomalies.__name__}: Funzione disabilitata, restituisco lista vuota.")
+            # Durante il backtest, non possiamo ottenere dati fondamentali storici da Finviz.
+            # Restituire una lista vuota è il comportamento più sicuro.
+            return []
+        
         """
         NUOVO: Identifica titoli con upgrade recenti di rating da analisti (PERLE RARE - Catalizzatore)
         CORRETTO: Rimossa 'Avg Volume' non pertinente.
@@ -732,6 +791,14 @@ class StockAnalyzer:
             return []
             
     def get_catalyst_candidates(self, n=10):
+        
+        if is_backtest_mode():
+            print(f"  [BACKTEST MODE] {self.get_valuation_anomalies.__name__}: Funzione disabilitata, restituisco lista vuota.")
+            # Durante il backtest, non possiamo ottenere dati fondamentali storici da Finviz.
+            # Restituire una lista vuota è il comportamento più sicuro.
+            return []
+        
+        
         """
         Cerca titoli con potenziali catalizzatori (PERLE RARE - Potenziato)
         Rimosso Return on Investment a causa di problemi con i filtri
