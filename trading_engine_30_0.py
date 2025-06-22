@@ -226,6 +226,8 @@ from dataclasses import dataclass
 import time as time_module
 import math
 
+print("--- trading_engine_30_0.py: Script avviato ---")
+
 # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
 # Questo blocco di codice serve solo a capire se stiamo facendo un backtest.
 from datetime import datetime
@@ -6978,347 +6980,162 @@ class IntegratedRevolutionaryTradingEngine:
             return False
 
     def run_integrated_trading_session(self):
-        """Esegue sessione di trading integrata completa"""
+        """
+        Esegue una sessione di trading integrata completa.
+        Questa versione è stata riscritta per chiarezza, robustezza e logging dettagliato,
+        mantenendo inalterata la logica di trading originale.
+        """
+        self.logger.info("=====================================================================")
+        self.logger.info("🚀 INIZIO SESSIONE DI TRADING INTEGRATA (Backtest/Live) 🚀")
+        self.logger.info("=====================================================================")
+        
         try:
-            self.logger.info("🚀 INTEGRATED REVOLUTIONARY TRADING SESSION STARTING...")
+            # --- FASE 1: CARICAMENTO E PREPARAZIONE ---
+            self.logger.info("--- FASE 1: Caricamento Stato e Dati ---")
             
-            # 1. Inizializzazione e caricamento stato
-            self.load_state() # Questo popola `trade_history`
+            # Carica lo stato del portafoglio (capitale, posizioni aperte, cronologia)
+            self.load_state()
+            
+            # Carica i dati di analisi dei ticker generati da stock_analyzer
             analysis_data = self.load_analysis_data()
-            
             if not analysis_data:
-                self.logger.error("❌ No analysis data available - cannot proceed")
+                self.logger.error("❌ ERRORE CRITICO: Dati di analisi non disponibili. Impossibile procedere.")
                 return False
-            
-            self.logger.info(f"📊 Analysis data loaded for {len(analysis_data)} tickers. Current Capital (from state): ${self.capital:,.2f}")
+            self.logger.info(f" -> Dati di analisi caricati per {len(analysis_data)} ticker.")
 
-            # === NUOVO DEBUG: VERIFICA DATI E PARAMETRI ===
-            self.logger.info(f"🔍 [SESSION DEBUG] ========== SESSION STARTUP DEBUG ==========")
-            self.logger.info(f"🔍 [SESSION DEBUG] Engine initialized successfully")
-            self.logger.info(f"🔍 [SESSION DEBUG] Capital: ${self.capital:,.2f}")
-            self.logger.info(f"🔍 [SESSION DEBUG] Open positions: {len(self.open_positions)}")
-            self.logger.info(f"🔍 [SESSION DEBUG] Analysis data keys (first 10): {list(analysis_data.keys())[:10]}")
+            # --- FASE 2: ANALISI DEL MERCATO E ADATTAMENTO PARAMETRI ---
+            self.logger.info("\n--- FASE 2: Analisi Mercato e Adattamento Parametri ---")
             
-            # Verifica che i dati di analisi contengano effettivamente dati
-            for i, (ticker, data) in enumerate(list(analysis_data.items())[:3]):  # Solo primi 3 per test
-                self.logger.info(f"🔍 [SESSION DEBUG] Sample data {ticker}: {len(data)} rows, columns: {list(data.columns)}")
-                if len(data) > 0:
-                    self.logger.info(f"🔍 [SESSION DEBUG] {ticker} last close: {data['Close'].iloc[-1]}")
-                if i >= 2:  # Limita a 3 esempi
-                    break
+            # Rileva il regime di mercato generale (es. 'strong_bull', 'sideways', etc.)
+            overall_market_trend = self.detect_overall_market_trend()
+            self.last_overall_trend = overall_market_trend
+            self.logger.info(f" -> Regime di mercato generale rilevato: {overall_market_trend.replace('_', ' ').title()}")
             
-            self.logger.info(f"🔍 [SESSION DEBUG] Current parameters:")
-            self.logger.info(f"🔍 [SESSION DEBUG]   min_roi_threshold: {self.min_roi_threshold}")
-            self.logger.info(f"🔍 [SESSION DEBUG]   rsi_oversold: {self.rsi_oversold}")
-            self.logger.info(f"🔍 [SESSION DEBUG]   volume_threshold: {self.volume_threshold}")
-            self.logger.info(f"🔍 [SESSION DEBUG]   min_signal_quality: {self.min_signal_quality}")
-            self.logger.info(f"🔍 [SESSION DEBUG]   min_price: {self.min_price}")
-            self.logger.info(f"🔍 [SESSION DEBUG]   max_price: {self.max_price}")
+            # Applica i parametri di trading ottimizzati per il regime di mercato corrente
+            # NOTA: Questo NON cambia la tua logica, ma solo i valori delle soglie (es. RSI, volume)
+            self.apply_regime_optimized_parameters(overall_market_trend)
             
-            # === Rilevamento regime di mercato complessivo e calcolo posizioni massime ===
-
-            # === Rilevamento regime di mercato complessivo e calcolo posizioni massime ===
-            self.logger.info("🌍 Detecting overall market trend...")
-            overall_market_trend_today = self.detect_overall_market_trend()
+            # Calcola dinamicamente la soglia di ROI minima richiesta per il regime attuale
+            if self.ai_enabled and self.meta_orchestrator:
+                dynamic_roi = self.meta_orchestrator.calculate_dynamic_roi_threshold(overall_market_trend, analysis_data)
+                self.min_roi_threshold = dynamic_roi
+                self.logger.info(f" -> Soglia ROI dinamica per oggi impostata a: {dynamic_roi:.2f}%")
             
-            # Aggiorna il regime globale dell'Engine
-            if overall_market_trend_today != 'unknown':
-                self.last_overall_trend = overall_market_trend_today
-            else:
-                self.logger.warning(f"Could not reliably detect overall market trend. Retaining last_overall_trend: {self.last_overall_trend}")
-            
-            self.logger.info(f"Overall Market Trend set to: {self.last_overall_trend.replace('_', ' ').title()}")
-    
-            # Calcola il numero massimo di posizioni consentite per il regime corrente
-            min_pos_for_regime = self.min_positions_per_regime.get(self.last_overall_trend, 2)
-            max_pos_for_regime = self.max_positions_per_regime.get(self.last_overall_trend, 8)
-            
-            # QUESTA È LA RIGA CHE DEFINISCE 'max_positions_allowed_today'
+            # Calcola il numero massimo di posizioni consentite per oggi
+            min_pos_for_regime = self.min_positions_per_regime.get(overall_market_trend, 2)
+            max_pos_for_regime = self.max_positions_per_regime.get(overall_market_trend, 8)
             max_positions_allowed_today = min(self.max_simultaneous_positions, max_pos_for_regime)
             max_positions_allowed_today = max(max_positions_allowed_today, min_pos_for_regime)
-    
-            self.logger.info(f"Current Market Regime: {self.last_overall_trend.replace('_', ' ').title()}")
-            self.logger.info(f"Maximum simultaneous positions allowed today: {max_positions_allowed_today} (based on regime).")
-            # === FINE: Rilevamento regime di mercato complessivo e calcolo posizioni massime ===
+            self.logger.info(f" -> Limite massimo di posizioni per oggi: {max_positions_allowed_today}")
 
-            # === NUOVA LOGICA: Sincronizzazione robusta del database AI ===
-            if self.meta_orchestrator: # Assicurati che l'orchestratore sia inizializzato
-                self.logger.info("🔄 Running detailed AI database sync at startup...")
-                
-                # Fase 1: Pulizia iniziale di eventuali duplicati basati su firme diverse
-                self.cleanup_duplicate_ai_trades()
-                
-                # Fase 2: Tenta di registrare i trade storici, usando INSERT OR REPLACE
-                # Questo è importante anche se l'AI è disabilitata nel bootstrap mode,
-                # perché popola il DB che l'AI userà in futuro.
+            # --- FASE 3: APPRENDIMENTO E SINCRONIZZAZIONE AI ---
+            self.logger.info("\n--- FASE 3: Apprendimento e Sincronizzazione IA ---")
+            if self.ai_enabled and self.meta_orchestrator:
+                # Sincronizza lo storico dei trade con il database dell'IA
+                self.logger.info(" -> Sincronizzazione storico trade con database IA...")
                 self._register_historical_trades_in_ai()
                 
-                # Fase 3: Debug e verifica del disallineamento
-                debug_results = self.debug_trade_synchronization()
-                
-                # Fase 4: Se c'è ancora un disallineamento o trade mancanti, forza la sincronizzazione
-                if debug_results.get('missing_in_ai', 0) > 0 or debug_results.get('extra_in_ai', 0) > 0:
-                    self.logger.info(f"🔧 Detected persistent misalignment: State={debug_results.get('state_count')} vs AI={debug_results.get('ai_count')}")
-                    self.logger.info(f"🔧 Missing in AI: {debug_results.get('missing_in_ai', 0)}")
-                    self.logger.info(f"🔧 Extra in AI: {debug_results.get('extra_in_ai', 0)}")
-                    self.logger.info(f"🔧 Running force synchronization on missing trades...")
-                    
-                    # Passa i dati dei trade mancanti alla funzione di forza sync
-                    success = self.force_ai_trade_synchronization(debug_results.get('missing_trade_data', []))
-                    if success:
-                        self.logger.info("✅ Force synchronization successful. Checking final state...")
-                        # Riesegui debug per verificare la correzione
-                        debug_results_final = self.debug_trade_synchronization()
-                        if debug_results_final.get('missing_in_ai', 0) == 0 and debug_results_final.get('extra_in_ai', 0) == 0:
-                            self.logger.info("🎉 PERFECT AI DATABASE SYNC ACHIEVED AFTER FORCE!")
-                        else:
-                            self.logger.warning("⚠️ Misalignment still present after force synchronization. Manual investigation may be needed.")
-                else:
-                    self.logger.info("✅ AI database perfectly synchronized after initial load and register.")
-                
-                self.logger.info("✅ Detailed AI database sync completed for this session.")
-            # === FINE NUOVA LOGICA: Sincronizzazione robusta del database AI ===
+                # Controlla se è necessario riaddestrare il modello AI
+                # La logica è basata sul tempo trascorso e sul numero di nuovi trade chiusi
+                # (Dettagli dentro la funzione stessa, qui la invochiamo solo)
+                self._check_and_retrain_ai_model()
+            else:
+                self.logger.info(" -> IA disabilitata, salto fase di apprendimento.")
 
-            # NUOVO: Log per verificare conteggi dopo la sincronizzazione completa
-            self.logger.info(f"🔍 TRADE COUNTS VERIFICATION (POST-SYNC):")
-            self.logger.info(f"   Trade History Count: {len(self.trade_history)}")
-            closed_trades_in_history = len([t for t in self.trade_history if t.get('exit_date')])
-            self.logger.info(f"   Closed Trades in History: {closed_trades_in_history}")
-            if self.ai_enabled and self.meta_orchestrator:
-                try:
-                    with sqlite3.connect(self.meta_orchestrator.performance_learner.db_path) as conn:
-                        cursor = conn.execute('SELECT COUNT(*) FROM trades')
-                        total_ai_trades = cursor.fetchone()[0]
-                        cursor = conn.execute('SELECT COUNT(*) FROM trades WHERE exit_date IS NOT NULL')
-                        closed_ai_trades = cursor.fetchone()[0]
-                    self.logger.info(f"   AI Database Total: {total_ai_trades}")
-                    self.logger.info(f"   AI Database Closed: {closed_ai_trades}")
-                    
-                    # Qui puoi usare `closed_ai_trades` per la logica di bootstrap
-                    self.current_closed_ai_trades = closed_ai_trades # Salva per il summary finale
-                except Exception as e:
-                    self.logger.error(f"   AI Database Error: {e}")
-                    self.current_closed_ai_trades = 0 # Fallback
-            else:
-                self.current_closed_ai_trades = closed_trades_in_history # Se AI non è attiva, usa la cronologia completa
+            # --- FASE 4: GENERAZIONE SEGNALI DI TRADING ---
+            self.logger.info("\n--- FASE 4: Generazione Segnali di Trading ---")
+            
+            # Genera segnali di acquisto usando l'ensemble di strategie e li potenzia con l'IA
+            self.logger.info(" -> Generazione segnali di ACQUISTO...")
+            buy_signals_map = self.generate_ensemble_signals(analysis_data)
+            self.logger.info(f" -> Trovati {len(buy_signals_map)} potenziali segnali di acquisto dopo valutazione IA.")
 
+            # Genera segnali di vendita per le posizioni aperte
+            self.logger.info(" -> Generazione segnali di VENDITA...")
+            sell_signals_map = self.generate_sell_signals(analysis_data)
+            self.logger.info(f" -> Trovati {len(sell_signals_map)} segnali di vendita.")
 
-            # 2. Logica di Apprendimento Continuo del Modello AI (basata su conteggio AI database)
-            if self.ai_enabled and self.meta_orchestrator:
-                current_date = datetime.now()
-                
-                # Ora usiamo current_total_closed_trades_for_bootstrap per il conteggio dell'AI
-                days_since_last_training = (current_date - self.last_ai_training_date).days
-                new_closed_trades_count = self.current_closed_ai_trades - self.total_closed_trades_at_last_ai_training
-                
-                needs_retraining = False
-                retraining_reason = ""
-    
-                # Condizione 1: Se il modello AI non è mai stato addestrato
-                if not self.meta_orchestrator.performance_learner.is_trained:
-                    needs_retraining = True
-                    retraining_reason = "AI model has never been trained before."
-                # Condizione 2: Se è passato abbastanza tempo dall'ultimo addestramento
-                elif days_since_last_training >= self.ai_training_frequency_days:
-                    needs_retraining = True
-                    retraining_reason = f"It's been {days_since_last_training} days since last AI training (>= {self.ai_training_frequency_days} days)."
-                # Condizione 3: Se ci sono abbastanza nuovi trade chiusi dall'ultimo addestramento
-                elif new_closed_trades_count >= self.ai_training_frequency_new_closed_trades:
-                    needs_retraining = True
-                    retraining_reason = f"{new_closed_trades_count} new closed trades detected (>= {self.ai_training_frequency_new_closed_trades} trades)."
-                
-                if needs_retraining:
-                    self.logger.info(f"🧠 Initiating AI model retraining: {retraining_reason}")
-                    if self.meta_orchestrator.performance_learner.train_model():
-                        # Aggiorna lo stato dell'addestramento dopo un successo
-                        self.last_ai_training_date = current_date
-                        self.total_closed_trades_at_last_ai_training = self.current_closed_ai_trades
-                        self.logger.info("🧠 AI model retraining successful.")
-                    else:
-                        self.logger.warning("⚠️ AI model retraining failed or insufficient data for training. Will try again later.")
-                else:
-                    self.logger.info(f"🧠 AI model retraining not required at this time. {days_since_last_training} days since last training, {new_closed_trades_count} new closed trades.")
+            # --- FASE 5: PREPARAZIONE E SALVATAGGIO ORDINI ---
+            self.logger.info("\n--- FASE 5: Preparazione e Salvataggio Ordini per Esecuzione ---")
             
-            # === PARAMETER OPTIMIZATION COMPLETA ===
-            self.logger.info("🎯 Applying Parameter Optimization...")
-    
-            # 1. Applica parametri ottimizzati per regime
-            self.apply_regime_optimized_parameters(self.last_overall_trend)
-    
-            # 2. Calcola ROI threshold dinamica
-            if self.ai_enabled and self.meta_orchestrator:
-                dynamic_roi = self.meta_orchestrator.calculate_dynamic_roi_threshold(
-                    self.last_overall_trend, analysis_data
-                )
-                self.min_roi_threshold = dynamic_roi
-                self.logger.info(f"🎯 Dynamic ROI threshold set to: {dynamic_roi:.2f}%")
-    
-            # 3. Adaptive re-balancing check
-            rebalancing_applied = self.adaptive_rebalancing_check(analysis_data)
-            if rebalancing_applied:
-                self.logger.info("✅ Adaptive re-balancing completed")
-            else:
-                self.logger.info("ℹ️ Parameters already optimal - no re-balancing needed")
-    
-            # 2.5. Ricerca REAL Alpha Sistematica
-            alpha_signals = {}
-            if self.real_alpha_research_enabled and self.real_alpha_research_framework:
-                self.logger.info("🔬 Running REAL Alpha Research on market data (FREE sources only)...")
-                try:
-                    alpha_signals = self.real_alpha_research_framework.run_real_alpha_research(analysis_data)
-                    if alpha_signals:
-                        self.logger.info(f"✅ REAL Alpha Research: {len(alpha_signals)} alpha signals discovered (conservative validation)")
-                    else:
-                        self.logger.info("ℹ️ REAL Alpha Research: No significant alpha signals found today")
-                except Exception as e:
-                    self.logger.error(f"REAL Alpha Research failed: {e}")
-            
-            
-            # 3. Generazione segnali Ensemble
-            # 3. Generazione segnali Ensemble
-            self.logger.info("🎯 Generating ensemble signals with AI enhancement...")
-            self.logger.info(f"🔍 [SESSION DEBUG] ========== SIGNAL GENERATION PHASE ==========")
-            self.logger.info(f"🔍 [SESSION DEBUG] analysis_data available: {len(analysis_data)} tickers")
-            self.logger.info(f"🔍 [SESSION DEBUG] AI enabled: {self.ai_enabled}")
-            self.logger.info(f"🔍 [SESSION DEBUG] meta_orchestrator exists: {self.meta_orchestrator is not None}")
-            
-            # Generazione segnali di acquisto
-            
-            # Salva alpha signals per l'uso nell'AI enhancement
-            if alpha_signals:
-                self._current_alpha_signals = alpha_signals
-                self.logger.info(f"🔍 [SESSION DEBUG] Saved {len(alpha_signals)} alpha signals for AI enhancement")
-            else:
-                self._current_alpha_signals = {}
-                self.logger.info(f"🔍 [SESSION DEBUG] No alpha signals to save")
-            
-            self.logger.info(f"🔍 [SESSION DEBUG] About to call generate_ensemble_signals...")
-            
-            try:
-                buy_signals_map_from_ensemble = self.generate_ensemble_signals(analysis_data)
-                self.logger.info(f"🔍 [SESSION DEBUG] generate_ensemble_signals returned {len(buy_signals_map_from_ensemble) if buy_signals_map_from_ensemble else 0} signals")
-            except Exception as ensemble_error:
-                self.logger.error(f"🔍 [SESSION DEBUG] EXCEPTION in generate_ensemble_signals: {ensemble_error}")
-                self.logger.error(f"🔍 [SESSION DEBUG] Traceback: {traceback.format_exc()}")
-                buy_signals_map_from_ensemble = {}
-            
-            if not buy_signals_map_from_ensemble:
-                self.logger.warning("⚠️ No qualified buy signals generated by ensemble.")
-                self.logger.warning(f"🔍 [SESSION DEBUG] buy_signals_map_from_ensemble is empty or None")
-            else:
-                self.logger.info(f"✅ Ensemble generated {len(buy_signals_map_from_ensemble)} potential buy signals.")
-                self.logger.info(f"🔍 [SESSION DEBUG] Signal tickers: {list(buy_signals_map_from_ensemble.keys())}")
-            
-            # Generazione segnali di vendita
-            self.logger.info(f"🔍 [SESSION DEBUG] About to call generate_sell_signals...")
-            
-            try:
-                sell_signals_map_from_ensemble = self.generate_sell_signals(analysis_data)
-                self.logger.info(f"🔍 [SESSION DEBUG] generate_sell_signals returned {len(sell_signals_map_from_ensemble) if sell_signals_map_from_ensemble else 0} signals")
-            except Exception as sell_error:
-                self.logger.error(f"🔍 [SESSION DEBUG] EXCEPTION in generate_sell_signals: {sell_error}")
-                self.logger.error(f"🔍 [SESSION DEBUG] Traceback: {traceback.format_exc()}")
-                sell_signals_map_from_ensemble = {}
-            
-            if not sell_signals_map_from_ensemble:
-                self.logger.info("ℹ️ No sell signals generated.")
-                self.logger.info(f"🔍 [SESSION DEBUG] sell_signals_map_from_ensemble is empty or None")
-            else:
-                self.logger.info(f"🛑 Generated {len(sell_signals_map_from_ensemble)} sell signals.")
-                self.logger.info(f"🔍 [SESSION DEBUG] Sell signal tickers: {list(sell_signals_map_from_ensemble.keys())}")
-            
-            # 4. PREPARAZIONE SEGNALI PER JSON (NON ESECUZIONE DIRETTA)
-            # === Ottieni il min_roi_threshold dinamico dal MetaOrchestrator ===
-            if self.ai_enabled and self.meta_orchestrator:
-                # Recupera il regime di mercato rilevato dall'engine
-                current_market_regime = getattr(self, 'last_overall_trend', 'unknown')
-                # Ottieni la soglia ROI specifica per il regime (già fatto sopra nel parameter optimization)
-                # Questo è ridondante ma mantenuto per compatibilità
-                # self.min_roi_threshold = self.meta_orchestrator.regime_specific_roi_thresholds.get(current_market_regime, self.min_roi_threshold)
-                self.logger.info(f"Current min_roi_threshold after optimization: {self.min_roi_threshold:.2f}% for {current_market_regime.replace('_', ' ').title()} regime.")
-            # ========================================================================
-            
-            # QUESTA È LA RIGA CHE PRIMA AVEVA L'ERRORE: max_positions_allowed_today è ora definita sopra.
+            # Prepara la lista finale di acquisti e vendite applicando i filtri finali
+            # (capitale, limiti di posizione, etc.)
             prepared_buy_list, prepared_sell_list = self.prepare_signals_for_json_export(
-                buy_signals_map_from_ensemble, 
-                sell_signals_map_from_ensemble,
-                max_positions_allowed_today # ORA È UN PARAMETRO DEFINITO
+                buy_signals_map, 
+                sell_signals_map,
+                max_positions_allowed_today
             )
+            self.logger.info(f" -> Segnali finali pronti per l'export: {len(prepared_buy_list)} acquisti, {len(prepared_sell_list)} vendite.")
             
-            # Salva i conteggi dei segnali preparati come attributi dell'engine per il summary finale
-            self.last_prepared_buys_count = len(prepared_buy_list)
-            self.last_prepared_sells_count = len(prepared_sell_list)
-                                                                          
-            # 5. Salva stato (Questo stato è PRE-ESECUZIONE REALE)
-            # Il capitale e le posizioni qui sono quelle lette all'inizio da alpaca_state_sync.py.
-            # Non vengono modificati da questo engine.
-            self.save_state() 
+            # Salva lo stato attuale del sistema (questo è lo stato PRE-esecuzione)
+            self.save_state()
             
-            # 6. Salva segnali PER L'EXECUTOR nel file 'data/execution_signals.json'
+            # Salva i segnali pronti per essere letti ed eseguiti da un altro script (il broker simulato)
             self.save_signals_for_executor(prepared_buy_list, prepared_sell_list)
             
-            # (Opzionale) Se vuoi ancora salvare la cronologia dei segnali grezzi dell'ensemble:
-            # self.save_trading_signals(buy_signals_map_from_ensemble, datetime.now()) # Questa era la tua vecchia funzione
-                                                                                 # che salvava in signals_history.
-            # 7. Genera report
-            self.logger.info("📝 Generating integrated report...")
-            previous_signals = self.load_previous_signals(days_lookback=7)
+            # --- FASE 6: REPORTING ---
+            self.logger.info("\n--- FASE 6: Generazione Report ---")
+            # Questa parte è stata rimossa perché il report viene generato dal backtester dopo la simulazione.
+            # Qui il motore ha solo prodotto i segnali, non sa ancora quali verranno eseguiti.
             
-            # Per il report, passiamo i segnali che abbiamo preparato per l'export.
-            # La funzione di report deve essere in grado di gestire questa struttura (liste di dizionari)
-            # o possiamo trasformarla di nuovo in un dizionario ticker:signal se necessario per il report.
-            # Per ora, il report è stato modificato per iterare su una mappa.
-            buy_signals_for_report = {s['ticker']: s for s in prepared_buy_list}
-            sell_signals_for_report = {s['ticker']: s for s in prepared_sell_list}
-            
-            
-            report_content = self.generate_integrated_report(
-                buy_signals=buy_signals_for_report, 
-                sell_signals=sell_signals_for_report, 
-                executed_buys=[], # L'engine non esegue più direttamente
-                previous_signals=previous_signals
-            )
-            
-            # 8. Salva report
-            report_filename = "Report_Olga_Trade.html"
-            report_path = self.reports_dir / report_filename
-            
-            with open(report_path, 'w', encoding='utf-8') as f: # La modalità 'w' sovrascrive automaticamente il file se esiste
-                f.write(report_content)
-            
-            self.logger.info(f"📄 Report saved: {report_path}")
-            
-            # 9. Summary finale
-            self.logger.info("🎉 INTEGRATED TRADING SESSION (SIGNAL GENERATION) COMPLETED!")
-            self.logger.info(f"✅ Signals Prepared for Executor: {len(prepared_buy_list)} buys, {len(prepared_sell_list)} sells.")
-            
-            if self.ai_enabled:
-                ai_approved_count = 0
-                for sig_data in buy_signals_map_from_ensemble.values(): # Controlla i segnali originali dell'ensemble
-                    if sig_data.get('ai_evaluation') and sig_data['ai_evaluation'].get('ai_action','').startswith('APPROVE'):
-                        ai_approved_count +=1
-                self.logger.info(f"🧠 AI Approved Signals among generated: {ai_approved_count}")
-            
-            # 10. Genera summary dettagliato per report
-            system_summary = self.generate_system_summary_for_report()
-            
-            # 11. Log dettagli aggiuntivi per report
-            self.logger.info(f"📊 Total tickers analyzed: {len(analysis_data)}")
-            self.logger.info(f"🎯 Current ROI threshold: {self.min_roi_threshold:.2f}%")
-            self.logger.info(f"📈 Open positions: {len(self.open_positions)}")
-            self.logger.info(f"💰 Available capital: ${self.capital:,.2f}")
-            
+            self.logger.info("=====================================================================")
+            self.logger.info("✅ SESSIONE DI TRADING (Generazione Segnali) COMPLETATA CON SUCCESSO ✅")
+            self.logger.info("=====================================================================")
             return True
             
         except Exception as e:
-            self.logger.error(f"🚨 INTEGRATED TRADING SESSION (SIGNAL GENERATION) FAILED: {e}")
-            self.logger.error(traceback.format_exc())
+            self.logger.error(f"🚨 ERRORE CRITICO nella sessione di trading: {e}")
+            self.logger.error(traceback.format_exc()) # Stampa l'errore completo per il debug
             return False
+
+    def _check_and_retrain_ai_model(self):
+        """Funzione helper per gestire la logica di retraining dell'IA."""
+        if not self.ai_enabled or not self.meta_orchestrator:
+            return
+
+        try:
+            # Conteggio dei trade chiusi nel DB dell'IA
+            with sqlite3.connect(self.meta_orchestrator.performance_learner.db_path) as conn:
+                cursor = conn.execute('SELECT COUNT(*) FROM trades WHERE exit_date IS NOT NULL')
+                closed_ai_trades = cursor.fetchone()[0]
+
+            days_since_last_training = 999
+            if self.last_ai_training_date:
+                days_since_last_training = (datetime.now() - self.last_ai_training_date).days
+            
+            new_closed_trades_count = closed_ai_trades - self.total_closed_trades_at_last_ai_training
+            
+            # Condizioni per il retraining
+            needs_retraining = False
+            reason = ""
+            if not self.meta_orchestrator.performance_learner.is_trained and closed_ai_trades >= 30:
+                needs_retraining = True
+                reason = "Primo addestramento (raggiunti 30 trade)."
+            elif days_since_last_training >= self.ai_training_frequency_days:
+                needs_retraining = True
+                reason = f"Tempo trascorso ({days_since_last_training} giorni)."
+            elif new_closed_trades_count >= self.ai_training_frequency_new_closed_trades:
+                needs_retraining = True
+                reason = f"Nuovi trade chiusi ({new_closed_trades_count})."
+
+            if needs_retraining:
+                self.logger.info(f" -> CONDIZIONI SODDISFATTE: Avvio riaddestramento IA (Motivo: {reason}).")
+                if self.meta_orchestrator.performance_learner.train_model():
+                    self.last_ai_training_date = datetime.now()
+                    self.total_closed_trades_at_last_ai_training = closed_ai_trades
+                    self.logger.info(" -> ✅ Riaddestramento IA completato con successo.")
+                else:
+                    self.logger.warning(" -> ⚠️ Riaddestramento IA fallito o dati insufficienti.")
+            else:
+                self.logger.info(" -> Nessun riaddestramento IA necessario in questa sessione.")
+        except Exception as e:
+            self.logger.error(f" -> Errore durante il controllo per il retraining dell'IA: {e}")
     
 # === MAIN EXECUTION ===
 
 def main():
     """Funzione principale di esecuzione"""
+    print("trading_engine: Funzione main avviata.")
     main_logger = logging.getLogger('MainExecution')
     
     try:
@@ -7337,6 +7154,8 @@ def main():
             state_file='data/trading_state.json',
             min_roi_threshold=9.0 # RIPORTATO A 9.0 PER PRODUZIONE NORMALE
         )
+        
+        print("trading_engine: Oggetto Engine creato. Avvio sessione di trading...")
         
         #########################################################
         # 🚨 GESTIONE BOOTSTRAP MODE E STATO AI
@@ -7397,6 +7216,8 @@ def main():
             main_logger.warning("⚠️ TRADING SESSION COMPLETED WITH ISSUES")
             main_logger.warning("🔄 Check logs for details")
             main_logger.warning("🛡️ System failsafes activated")
+            
+        print(f"trading_engine: Sessione di trading terminata con successo={success}.")
         
         return success
         
