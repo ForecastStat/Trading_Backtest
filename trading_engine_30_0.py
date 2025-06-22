@@ -3943,81 +3943,71 @@ class IntegratedRevolutionaryTradingEngine:
 # === METODI GENERAZIONE SEGNALI (IDENTICI AL SISTEMA ESISTENTE) ===
 
     def generate_rsi_momentum_signals(self, analysis_data):
-        """Genera segnali RSI momentum (identico al sistema esistente)"""
+        """Genera segnali RSI momentum (CON LOG DI DEBUG DETTAGLIATO)"""
         signals = {}
+        self.logger.info(f"--- Inizio Generazione Segnali RSI Momentum (Totale Ticker: {len(analysis_data)}) ---")
         
-        self.logger.info(f"🔍 [RSI DEBUG] Starting RSI signal generation with {len(analysis_data)} tickers")
-        self.logger.info(f"🔍 [RSI DEBUG] Current parameters: rsi_oversold={self.rsi_oversold}, volume_threshold={self.volume_threshold}, min_signal_quality={self.min_signal_quality}")
-        
-        try:
-            processed_count = 0
-            qualified_count = 0
-            
-            for ticker, data in analysis_data.items():
-                processed_count += 1
-                self.logger.info(f"🔍 [RSI DEBUG] Processing {ticker} ({processed_count}/{len(analysis_data)})")
+        for ticker, data in analysis_data.items():
+            try:
+                if len(data) < 50:
+                    continue # Saltiamo in silenzio i ticker con pochi dati
+
+                # Calcoliamo gli indicatori
+                indicators = self.calculate_advanced_indicators(data, ticker)
+                if not indicators: continue
+
+                rsi = indicators.get('RSI_14')
+                volume_ratio = indicators.get('Volume_Ratio', 1)
+                signal_quality = indicators.get('SignalQuality', 1)
+                current_price = data['Close'].iloc[-1]
                 
-                try:
-                    if len(data) < 50:
-                        self.logger.info(f"🔍 [RSI DEBUG] {ticker}: Insufficient data ({len(data)} rows)")
-                        continue
-                    
-                    self.logger.info(f"🔍 [RSI DEBUG] {ticker}: Calculating indicators...")
-                    indicators = self.calculate_advanced_indicators(data, ticker)
-                    
-                    rsi = indicators.get('RSI_14')
-                    volume_ratio = indicators.get('Volume_Ratio', 1)
-                    signal_quality = indicators.get('SignalQuality', 1)
-                    
-                    self.logger.info(f"🔍 [RSI DEBUG] {ticker}: RSI={rsi}, Volume_Ratio={volume_ratio}, Signal_Quality={signal_quality}")
-                    
-                    # Controlla ogni condizione separatamente
-                    rsi_condition = rsi is not None and rsi <= self.rsi_oversold
-                    volume_condition = volume_ratio >= self.volume_threshold
-                    quality_condition = signal_quality >= self.min_signal_quality
-                    
-                    self.logger.info(f"🔍 [RSI DEBUG] {ticker}: Conditions - RSI<={self.rsi_oversold}: {rsi_condition}, Volume>={self.volume_threshold}: {volume_condition}, Quality>={self.min_signal_quality}: {quality_condition}")
-                    
-                    if rsi_condition and volume_condition and quality_condition:
-                        current_price = data['Close'].iloc[-1]
-                        
-                        price_condition = self.min_price <= current_price <= self.max_price
-                        self.logger.info(f"🔍 [RSI DEBUG] {ticker}: Price={current_price}, Price condition ({self.min_price} <= {current_price} <= {self.max_price}): {price_condition}")
-                        
-                        if price_condition:
-                            # Calculate expected ROI
-                            roi_estimate = self._calculate_rsi_roi_estimate(indicators, data)
-                            
-                            signals[ticker] = {
-                                'method': 'RSI_Momentum',
-                                'entry_price': current_price,
-                                'rsi_value': rsi,
-                                'volume_ratio': volume_ratio,
-                                'signal_quality': signal_quality,
-                                'ref_score_or_roi': roi_estimate,
-                                'indicators': indicators,
-                                'timestamp': datetime.now().isoformat()
-                            }
-                            
-                            qualified_count += 1
-                            self.logger.info(f"🔍 [RSI DEBUG] {ticker}: ✅ QUALIFIED! RSI={rsi:.2f}, ROI={roi_estimate:.2f}%")
-                        else:
-                            self.logger.info(f"🔍 [RSI DEBUG] {ticker}: ❌ Price out of range")
-                    else:
-                        self.logger.info(f"🔍 [RSI DEBUG] {ticker}: ❌ Conditions not met")
+                # --- INIZIO BLOCCO DI LOG PER IL DEBUG ---
+                log_msg = f"Check {ticker}: Prezzo=${current_price:.2f}, RSI={rsi:.2f}, VolRatio={volume_ratio:.2f}x, Qualità={signal_quality:.2f}"
                 
-                except Exception as ticker_error:
-                    self.logger.warning(f"🔍 [RSI DEBUG] {ticker}: ERROR - {ticker_error}")
+                # Controlliamo ogni condizione e spieghiamo perché viene scartata
+                if rsi is None or rsi > self.rsi_oversold:
+                    log_msg += f" -> SCARTATO (RSI > {self.rsi_oversold})"
+                    self.logger.info(log_msg)
                     continue
-            
-            self.logger.info(f"🔍 [RSI DEBUG] COMPLETED: Processed {processed_count}, Qualified {qualified_count}")
-            self.logger.info(f"RSI Momentum signals generated: {len(signals)}")
-            return signals
-            
-        except Exception as e:
-            self.logger.error(f"🔍 [RSI DEBUG] CRITICAL ERROR: {e}")
-            self.logger.error(f"RSI momentum signals generation failed: {e}")
-            return {}
+
+                if volume_ratio < self.volume_threshold:
+                    log_msg += f" -> SCARTATO (Volume Ratio < {self.volume_threshold})"
+                    self.logger.info(log_msg)
+                    continue
+                
+                if signal_quality < self.min_signal_quality:
+                    log_msg += f" -> SCARTATO (Qualità Segnale < {self.min_signal_quality})"
+                    self.logger.info(log_msg)
+                    continue
+                
+                if not (self.min_price <= current_price <= self.max_price):
+                    log_msg += f" -> SCARTATO (Prezzo fuori range [{self.min_price}-{self.max_price}])"
+                    self.logger.info(log_msg)
+                    continue
+                
+                # Se arriva qui, il segnale è qualificato
+                log_msg += " -> ✅ QUALIFICATO (RSI)"
+                self.logger.info(log_msg)
+                # --- FINE BLOCCO DI LOG PER IL DEBUG ---
+
+                roi_estimate = self._calculate_rsi_roi_estimate(indicators, data)
+                
+                signals[ticker] = {
+                    'method': 'RSI_Momentum',
+                    'entry_price': current_price,
+                    'rsi_value': rsi,
+                    'volume_ratio': volume_ratio,
+                    'signal_quality': signal_quality,
+                    'ref_score_or_roi': roi_estimate,
+                    'indicators': indicators,
+                    'timestamp': datetime.now().isoformat()
+                }
+            except Exception as e:
+                self.logger.warning(f"Errore durante l'analisi RSI per {ticker}: {e}")
+                continue
+        
+        self.logger.info(f"--- Fine Generazione Segnali RSI. Trovati {len(signals)} segnali qualificati. ---")
+        return signals
     
     def generate_ma_cross_signals(self, analysis_data):
         """Genera segnali Moving Average Cross (identico al sistema esistente)"""
@@ -6311,170 +6301,142 @@ class IntegratedRevolutionaryTradingEngine:
     
     def prepare_signals_for_json_export(self, buy_signals_map, sell_signals_map, max_positions_allowed_today):
         """
-        Prepara i segnali di acquisto e vendita nel formato richiesto per execution_signals.json.
-        Utilizza un robusto modello di Risk-Based Position Sizing e SIMULA LA RIDUZIONE DEL CAPITALE.
-        NON esegue trade direttamente.
+        Prepara i segnali per l'export JSON con LOG DI DEBUG DETTAGLIATO.
+        Decide quali trade eseguire in base a ROI, capitale e limiti di posizione.
         """
-        self.logger.info(f"Preparing {len(buy_signals_map)} buy signals and {len(sell_signals_map)} sell signals for JSON export...")
-        self.logger.info(f"Max positions allowed by market regime: {max_positions_allowed_today}")
-        
-        prepared_buys = []
-        prepared_sells = []
-    
-        # === NUOVO: Tracciamento del capitale simulato ===
-        simulated_available_capital = self.capital
-        self.logger.info(f"Starting preparation with simulated capital of ${simulated_available_capital:.2f}")
-    
-        # --- Processo Segnali di Acquisto ---
+        # Ordina i potenziali acquisti dal più promettente (ROI più alto) al meno.
         sorted_buy_signals = sorted(
             buy_signals_map.items(),
-            key=lambda x: x[1].get('ai_enhanced_roi', x[1].get('ref_score_or_roi', 0)),
+            key=lambda item: item[1].get('ai_enhanced_roi', item[1].get('ref_score_or_roi', 0)),
             reverse=True
         )
         
-        buy_signals_processed_count = 0
+        self.logger.info(f"--- Inizio Preparazione Segnali per Export (Candidati Acquisto: {len(sorted_buy_signals)}) ---")
+        self.logger.info(f"Parametri Chiave: Max Posizioni aperte={max_positions_allowed_today}, Min ROI richiesto={self.min_roi_threshold:.2f}%")
+        self.logger.info(f"Stato Attuale: Posizioni Aperte={len(self.open_positions)}, Capitale=${self.capital:,.2f}")
+        
+        prepared_buys = []
+        prepared_sells = []
+        simulated_available_capital = self.capital
+    
+        # --- 1. Processo Segnali di Acquisto ---
         for ticker, signal_data in sorted_buy_signals:
             
-            # --- Filtri Preliminari ---
-            if buy_signals_processed_count >= self.max_signals_per_day:
-                self.logger.info(f"Max signals per day ({self.max_signals_per_day}) reached. No more buy signals will be prepared.")
-                break
-            
+            self.logger.info(f"--> Valutando acquisto per {ticker}...")
+    
+            # --- Filtro 1: Limite massimo di segnali giornalieri ---
+            if len(prepared_buys) >= self.max_signals_per_day:
+                self.logger.info(f"  -> SCARTATO: Raggiunto limite massimo di acquisti per oggi ({self.max_signals_per_day}).")
+                break # Interrompe il ciclo, non ha senso continuare
+    
+            # --- Filtro 2: Limite massimo di posizioni totali ---
+            # Controlla le posizioni già aperte + quelle che abbiamo già deciso di aprire oggi
             if (len(self.open_positions) + len(prepared_buys)) >= max_positions_allowed_today:
-                self.logger.info(f"Max simultaneous positions ({max_positions_allowed_today}) reached. No more buy signals will be prepared.")
-                break
+                self.logger.info(f"  -> SCARTATO: Raggiunto limite massimo di posizioni totali ({max_positions_allowed_today}).")
+                break # Interrompe il ciclo
     
+            # --- Filtro 3: Posizione già aperta ---
             if ticker in [pos['ticker'] for pos in self.open_positions]:
-                self.logger.info(f"[{ticker}] BUY signal skipped: Ticker already in open positions.")
-                continue
+                self.logger.info(f"  -> SCARTATO: Esiste già una posizione aperta per {ticker}.")
+                continue # Passa al prossimo ticker
     
+            # --- Filtro 4: Soglia minima di ROI (Rendimento su Investimento) ---
             ref_score = signal_data.get('ai_enhanced_roi', signal_data.get('ref_score_or_roi', 0))
             if ref_score < self.min_roi_threshold:
-                self.logger.info(f"[{ticker}] BUY signal (ROI: {ref_score:.2f}%) below threshold {self.min_roi_threshold:.2f}%. Skipping.")
-                continue
+                self.logger.info(f"  -> SCARTATO: ROI Atteso ({ref_score:.2f}%) è inferiore alla soglia minima ({self.min_roi_threshold:.2f}%).")
+                continue # Passa al prossimo ticker
             
+            # --- Filtro 5: Validità del prezzo ---
             current_price = self.ensure_scalar(signal_data.get('entry_price'))
             if not self.is_valid_indicator(current_price) or not (self.min_price <= current_price <= self.max_price):
-                self.logger.warning(f"[{ticker}] BUY signal skipped: Price ${current_price:.2f} is invalid or out of range (${self.min_price:.2f}-${self.max_price:.2f}).")
-                continue
+                self.logger.warning(f"  -> SCARTATO: Prezzo ${current_price:.2f} è invalido o fuori dal range consentito (${self.min_price:.2f}-${self.max_price:.2f}).")
+                continue # Passa al prossimo ticker
     
-            # === BLOCCO CALCOLO QUANTITÀ (CON GESTIONE CAPITALE SIMULATO) ===
+            # Se arriva qui, il segnale è buono. Ora calcoliamo quanto comprare.
+            self.logger.info(f"  -> OK: {ticker} ha passato i filtri preliminari con ROI {ref_score:.2f}%. Calcolo dimensione posizione...")
     
-            # 1. Calcola il rischio massimo in dollari per questo trade
-            max_risk_amount = self.capital * (self.risk_per_trade_percent / 100)
-            
-            # 2. Calcola la distanza di stop (rischio per azione) con il "cap" di sicurezza
-            indicators = signal_data.get('indicators', {})
-            avg_daily_move_abs = safe_float_conversion(indicators.get('ATR'), current_price * 0.02)
-            stop_distance_from_volatility = avg_daily_move_abs * 2.0
-            
-            max_stop_percentage = 12.0
-            max_stop_distance_from_cap = current_price * (max_stop_percentage / 100)
-            
-            stop_distance_per_share = min(stop_distance_from_volatility, max_stop_distance_from_cap)
-            
-            if stop_distance_per_share <= 0.001:
-                stop_distance_per_share = current_price * (self.stop_loss_percentage / 100)
-                self.logger.warning(f"[{ticker}] Stop distance was zero. Forced to default system percentage ({self.stop_loss_percentage:.1f}%).")
+            # --- Calcolo della Quantità da Acquistare (Position Sizing) ---
+            try:
+                # Usa l'ATR (Average True Range) per un dimensionamento basato sulla volatilità
+                indicators = signal_data.get('indicators', {})
+                atr = safe_float_conversion(indicators.get('ATR'), current_price * 0.02) # Fallback al 2% del prezzo
+                stop_distance_per_share = atr * 2.0 # Stop loss a 2 volte l'ATR
+                
+                # Limita lo stop loss a una percentuale massima per sicurezza
+                max_stop_distance = current_price * (12.0 / 100) # Max 12% di stop
+                stop_distance_per_share = min(stop_distance_per_share, max_stop_distance)
+                
+                if stop_distance_per_share <= 0: stop_distance_per_share = current_price * 0.08 # Fallback di sicurezza
     
-            self.logger.info(f"[{ticker}] Stop Distance Calculation: Volatility-based=${stop_distance_from_volatility:.2f}, Cap-based=${max_stop_distance_from_cap:.2f} -> Final Used=${stop_distance_per_share:.2f}")
+                # Calcola quanto investire in base al rischio
+                max_risk_per_trade = self.capital * (self.risk_per_trade_percent / 100)
+                quantity_estimated = math.floor(max_risk_per_trade / stop_distance_per_share)
+                
+                # Applica il moltiplicatore dell'IA se presente
+                ai_multiplier = signal_data.get('ai_size_multiplier', 1.0)
+                quantity_estimated = math.floor(quantity_estimated * ai_multiplier)
     
-            # 3. Calcola la quantità teorica e applica il moltiplicatore AI
-            if stop_distance_per_share > 0:
-                theoretical_max_shares = max_risk_amount / stop_distance_per_share
-            else:
-                theoretical_max_shares = 0
-            
-            ai_multiplier = signal_data.get('ai_size_multiplier', 1.0)
-            if signal_data.get('bootstrap_mode', False):
-                if ai_multiplier == 0.0:
-                    self.logger.info(f"[{ticker}] BOOTSTRAP OVERRIDE: AI multiplier was 0, forcing to 1.0 for data collection.")
-                    ai_multiplier = 1.0
-    
-            quantity_estimated = math.floor(theoretical_max_shares * ai_multiplier)
-            self.logger.info(f"[{ticker}] Sizing Step 1 (Risk-Based): Risk=${max_risk_amount:.2f}, StopDist=${stop_distance_per_share:.2f} -> Shares={theoretical_max_shares:.2f} * AI_Multiplier={ai_multiplier:.2f} -> Initial Qty={quantity_estimated}")
-            
-            # 4. Validazioni e limiti sulla quantità e valore del trade
-            if quantity_estimated <= 0:
-                self.logger.warning(f"[{ticker}] BUY signal SKIPPED: Final calculated quantity is {quantity_estimated}.")
-                continue
-    
-            trade_value = quantity_estimated * current_price
-            
-            if trade_value > self.max_trade_amount:
-                quantity_estimated = math.floor(self.max_trade_amount / current_price)
                 trade_value = quantity_estimated * current_price
-                self.logger.info(f"[{ticker}] Sizing Step 2: Trade value exceeds max_trade_amount. Reduced quantity to {quantity_estimated}.")
-            
-            if trade_value < self.min_trade_amount:
-                qty_for_min = math.floor(self.min_trade_amount / current_price)
-                if (qty_for_min * current_price) <= self.max_trade_amount:
-                    quantity_estimated = qty_for_min
-                    trade_value = quantity_estimated * current_price
-                    self.logger.info(f"[{ticker}] Sizing Step 3: Trade value was below minimum. Increased quantity to {quantity_estimated} to meet min_trade_amount.")
-                else:
-                    self.logger.warning(f"[{ticker}] BUY signal SKIPPED: Cannot meet min_trade_amount without exceeding max_trade_amount.")
+    
+                # Applica limiti minimi e massimi di investimento
+                if trade_value > self.max_trade_amount:
+                    quantity_estimated = math.floor(self.max_trade_amount / current_price)
+                if trade_value < self.min_trade_amount:
+                     quantity_estimated = math.ceil(self.min_trade_amount / current_price)
+                
+                trade_value = quantity_estimated * current_price # Ricalcola il valore finale
+    
+                # --- Filtro 6: Capitale Disponibile ---
+                if trade_value > simulated_available_capital:
+                    self.logger.warning(f"  -> SCARTATO: Capitale insufficiente. Richiesto ${trade_value:,.2f}, disponibile ${simulated_available_capital:,.2f}.")
                     continue
-            
-            # === MODIFICA CRUCIALE: CONTROLLO SUL CAPITALE SIMULATO ===
-            if trade_value > simulated_available_capital:
-                self.logger.warning(f"[{ticker}] BUY signal SKIPPED: Trade value ${trade_value:.2f} exceeds SIMULATED available capital ${simulated_available_capital:.2f}.")
-                continue
-            # === FINE MODIFICA CRUCIALE ===
     
-            stop_loss_price = current_price - stop_distance_per_share
-            risk_reward_ratio = 1.5
-            take_profit_price = current_price + (stop_distance_per_share * risk_reward_ratio) 
-            self.logger.info(f"[{ticker}] Final TP calculated for a {risk_reward_ratio} R:R ratio based on stop distance.")
+                if quantity_estimated <= 0:
+                    self.logger.warning(f"  -> SCARTATO: La quantità calcolata è zero o negativa.")
+                    continue
+                
+                # --- Preparazione Finale del Segnale di Acquisto ---
+                stop_loss_price = current_price - stop_distance_per_share
+                take_profit_price = current_price + (stop_distance_per_share * 1.5) # R:R di 1.5
     
-            indicators_for_json = convert_for_json(signal_data.get('indicators', {}))
-            buy_to_export = {
-                "ticker": ticker,
-                "entry_price": float(current_price),
-                "stop_loss": float(stop_loss_price),
-                "take_profit": float(take_profit_price),
-                "quantity_estimated": int(quantity_estimated),
-                "reason_methods": signal_data.get('methods', [signal_data.get('method', 'Unknown')]),
-                "ai_evaluation_details": signal_data.get('ai_evaluation', {}),
-                "advanced_indicators_at_buy": indicators_for_json
-            }
-            
-            prepared_buys.append(buy_to_export)
-            buy_signals_processed_count += 1
-            
-            # --- Aggiorna il capitale simulato DOPO aver preparato l'ordine ---
-            simulated_available_capital -= trade_value
-            self.logger.info(f"✅ [{ticker}] BUY signal PREPARED for export: Qty={int(quantity_estimated)}, Cost=${trade_value:.2f}. Remaining Simulated Capital: ${simulated_available_capital:.2f}")
+                buy_to_export = {
+                    "ticker": ticker,
+                    "entry_price": float(current_price),
+                    "stop_loss": float(stop_loss_price),
+                    "take_profit": float(take_profit_price),
+                    "quantity_estimated": int(quantity_estimated),
+                    "reason_methods": signal_data.get('methods', [signal_data.get('method', 'Unknown')]),
+                    "ai_evaluation_details": signal_data.get('ai_evaluation', {}),
+                    "advanced_indicators_at_buy": convert_for_json(signal_data.get('indicators', {}))
+                }
+                
+                prepared_buys.append(buy_to_export)
+                simulated_available_capital -= trade_value # Aggiorna il capitale fittizio
+                
+                self.logger.info(f"  -> ✅ SEGNALE ACQUISTO PREPARATO: {int(quantity_estimated)} azioni di {ticker} per ${trade_value:,.2f}. Capitale simulato rimanente: ${simulated_available_capital:,.2f}")
     
-        # --- Processo Segnali di Vendita ---
+            except Exception as e:
+                self.logger.error(f"  -> ERRORE CRITICO durante il calcolo della quantità per {ticker}: {e}")
+                continue # Salta al prossimo ticker in caso di errore
+    
+        # --- 2. Processo Segnali di Vendita ---
         if sell_signals_map:
-            # ... (la logica di vendita non consuma capitale, quindi rimane invariata) ...
+            self.logger.info(f"--- Inizio Preparazione Segnali di Vendita (Candidati: {len(sell_signals_map)}) ---")
             for ticker, signal_data in sell_signals_map.items():
                 qty_to_sell = self.ensure_scalar(signal_data.get('quantity_to_sell'))
-                reason_sell = signal_data.get('reason', 'Strategy Exit')
-                current_price_sell = self.ensure_scalar(signal_data.get('current_price'))
-    
-                matching_position = next((p for p in self.open_positions if p['ticker'] == ticker), None)
-                if matching_position is None:
-                    self.logger.warning(f"[{ticker}] SELL signal skipped: Ticker not found in current open positions.")
-                    continue
-    
-                qty_to_sell = min(qty_to_sell, matching_position.get('quantity', qty_to_sell))
-                    
                 if not self.is_valid_indicator(qty_to_sell) or qty_to_sell <= 0:
-                    self.logger.warning(f"[{ticker}] SELL signal skipped: Invalid quantity ({qty_to_sell}).")
+                    self.logger.warning(f"  -> SCARTATO (Vendita): Quantità invalida per {ticker}.")
                     continue
-    
+                
                 prepared_sells.append({
                     "ticker": ticker,
-                    "reason": reason_sell,
+                    "reason": signal_data.get('reason', 'Strategy Exit'),
                     "quantity": int(qty_to_sell),
-                    "current_price": float(current_price_sell)
+                    "current_price": float(signal_data.get('current_price'))
                 })
-                self.logger.info(f"✅ [{ticker}] SELL signal PREPARED for export: Qty={int(qty_to_sell)}, Reason='{reason_sell}'")
-        else:
-            self.logger.info("No sell signals to prepare for export.")
+                self.logger.info(f"  -> ✅ SEGNALE VENDITA PREPARATO: {int(qty_to_sell)} azioni di {ticker} per '{signal_data.get('reason')}'")
     
+        self.logger.info(f"--- Preparazione Segnali Completata. Totale Acquisti: {len(prepared_buys)}, Totale Vendite: {len(prepared_sells)} ---")
         return prepared_buys, prepared_sells
 
 # === GENERAZIONE REPORT (IDENTICA AL SISTEMA ESISTENTE + AI INFO) ===
