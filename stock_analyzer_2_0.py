@@ -1058,24 +1058,29 @@ class StockAnalyzer:
         # Se dopo la verifica non abbiamo abbastanza candidati, aggiungiamo dalla lista di fallback
         if len(final_verified_candidates) < max_stocks:
             print(f"\n   -> Selezione insufficiente ({len(final_verified_candidates)}/{max_stocks}). Aggiungo dalla lista di fallback...")
-            num_fallbacks_to_add = max_stocks - len(final_verified_candidates)
-            fallbacks_added = 0
-            for fb_ticker in self.fallback_tickers:
-                if fallbacks_added >= num_fallbacks_to_add:
-                    break
-                if fb_ticker not in final_verified_candidates:
-                    final_verified_candidates.append(fb_ticker)
-                    fallbacks_added += 1
-                    print(f"     -> Aggiunto fallback: {fb_ticker}")
-            num_fallbacks_in_final_selection = fallbacks_added
+            # Aggiungiamo i ticker di fallback che non sono già nella lista dei candidati
+            # e che hanno uno score, anche se basso.
+            fallbacks_to_add = [t for t in self.fallback_tickers if t not in final_verified_candidates and t in candidates_scores]
+            
+            # Se ancora non basta, prendiamo i fallback generici
+            if len(final_verified_candidates) + len(fallbacks_to_add) < max_stocks:
+                 generic_fallbacks = [t for t in self.fallback_tickers if t not in final_verified_candidates and t not in fallbacks_to_add]
+                 fallbacks_to_add.extend(generic_fallbacks)
+        
+            num_to_take = max_stocks - len(final_verified_candidates)
+            
+            for fb_ticker in fallbacks_to_add[:num_to_take]:
+                final_verified_candidates.append(fb_ticker)
+                num_fallbacks_in_final_selection += 1
+                print(f"     -> Aggiunto fallback: {fb_ticker}")
         
         final_selected_candidates = final_verified_candidates[:max_stocks]
         
         print(f"\n--- Selezione Candidati Diversificati Completata ---")
         print(f"🏆 SELEZIONE FINALE ({len(final_selected_candidates)} titoli): {', '.join(final_selected_candidates)}")
         
-        # Ritorna la lista dei candidati e il conteggio dei fallback
         return final_selected_candidates, num_fallbacks_in_final_selection
+        
 
     def save_analysis_results(self, results, filename_str='data/latest_analysis.json'):
         filepath = BASE_DIR / filename_str 
