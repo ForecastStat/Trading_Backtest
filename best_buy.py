@@ -82,11 +82,13 @@ class EnhancedBestBuySelector:
         """
         print(f"ℹ️ Fase 1: Estrazione watchlist iniziale da Finviz...")
         try:
+            print("best_buy.py: Inizio chiamata a Finviz screener...")
             overview = Overview()
             filters_dict = {'Analyst Recom.': 'Strong Buy (1)'}
             overview.set_filter(filters_dict=filters_dict)
 
             df_raw = overview.screener_view(order='Price/Earnings', ascend=True)
+            print("best_buy.py: Chiamata a Finviz completata.")
 
             if df_raw is None or df_raw.empty:
                 print("⚠️ Finviz: Nessun dato restituito dallo screener di Finviz.")
