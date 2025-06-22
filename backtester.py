@@ -143,7 +143,12 @@ def run_backtest_chunk():
         print(f"\n--- Simulazione {date_str} ({days_processed + 1}/{MAX_DAYS_PER_RUN}) ---")
         os.environ['SIMULATED_DATE'] = date_str
         
-        scripts_to_run = ["best_buy.py", "stock_analyzer_2_0.py", "trading_engine_30_0.py"]
+        if 'last_bestbuy_month' not in state or state['last_bestbuy_month'] != day_dt.month:
+            print(f"  - Eseguo best_buy.py per il mese {day_dt.strftime('%Y-%m')}...")
+            subprocess.run(["python", "best_buy.py"], text=True, check=False)
+            state['last_bestbuy_month'] = day_dt.month # Aggiorna lo stato
+        
+        scripts_to_run = [ "stock_analyzer_2_0.py", "trading_engine_30_0.py"]
         all_scripts_succeeded = True
         for i, script_name in enumerate(scripts_to_run):
             result = subprocess.run(["python", script_name], text=True, check=False)
