@@ -2528,23 +2528,22 @@ class IntegratedRevolutionaryTradingEngine:
     """
     
     def __init__(self, capital=100000, state_file='data/trading_state.json', min_roi_threshold=9.0):
-        
+    
         # === CONFIGURAZIONE SISTEMA ESISTENTE (da trading_engine_23_0.py) ===
         self.capital = capital
         self.state_file = Path(state_file)
         self.min_roi_threshold = min_roi_threshold
         
-        # Portfolio tracking (mantenuto identico al sistema esistente)
+        # Portfolio tracking
         self.open_positions = []
         self.trade_history = []
         self.daily_pnl = []
         self.portfolio_value_history = []
         
-        # Parametri trading (mantenuti identici al sistema esistente)
+        # Parametri trading
         self.max_signals_per_day = 15
-        self.max_simultaneous_positions = 15 # Questo valore diventerà il default se non sovrascritto dal regime
-
-        # --- MODIFICA INIZIO: Limiti posizioni per regime ---
+        self.max_simultaneous_positions = 15
+    
         self.min_positions_per_regime = {
             "strong_bull": 5, "volatile_bull": 4, "sideways": 3, "early_recovery": 4,
             "early_decline": 2, "volatile_bear": 1, "strong_bear": 0, "unknown": 2
@@ -2553,7 +2552,6 @@ class IntegratedRevolutionaryTradingEngine:
             "strong_bull": 20, "volatile_bull": 15, "sideways": 10, "early_recovery": 12,
             "early_decline": 7, "volatile_bear": 5, "strong_bear": 3, "unknown": 8
         }
-        # --- MODIFICA FINE ---
         
         self.min_trade_amount = 500
         self.max_trade_amount = 15000
@@ -2562,18 +2560,17 @@ class IntegratedRevolutionaryTradingEngine:
         self.position_size_base = 0.05
         self.risk_per_trade_percent = 5.0
         
-        # Parametri tecnici (mantenuti identici)
+        # Parametri tecnici
         self.rsi_oversold = 30
         self.rsi_overbought = 70
         self.volume_threshold = 1.5
         self.min_volume = 100000
         self.min_price = 1.0
         self.max_price = 500.0
-        # Parametri di vendita specifici (dal sistema esistente 23.0)
         self.rsi_sell_threshold = 78.0
         self.macd_sell_threshold = -0.1
         
-        # Parametri avanzati (dal sistema esistente)
+        # Parametri avanzati
         self.entropy_threshold = 0.75
         self.determinism_threshold = 0.15
         self.min_signal_quality = 1.0
@@ -2581,89 +2578,62 @@ class IntegratedRevolutionaryTradingEngine:
         self.noise_threshold = 0.7
         self.correlation_threshold = 0.3
         
-        # Parametri genetici (dal sistema esistente)
+        # Parametri genetici
         self.genetic_population_size = 50
         self.genetic_generations = 30
         self.genetic_mutation_rate = 0.1
         self.genetic_elite_size = 10
         self.logger = logging.getLogger(f"{__name__}.IntegratedEngine")
         
-        
-        # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
-        # Controlliamo se stiamo eseguendo un backtest. Se sì, applichiamo regole speciali.
+        # --- INIZIO BLOCCO MODIFICA PER BACKTEST (v3 - Unico e Corretto) ---
         if 'SIMULATED_DATE' in os.environ:
-            # PRIMA COSA: Diciamo allo script di salvare i dati del backtest in una cartella separata
-            # per non rovinare i dati del trading reale.
-            global DATA_DIR, AI_MODELS_DIR, PERFORMANCE_DB_FILE, TRADING_STATE_FILE
-            self.logger.info("MODALITÀ BACKTEST RILEVATA: I dati verranno salvati in 'data_backtest'.")
+            global DATA_DIR, AI_MODELS_DIR, PERFORMANCE_DB_FILE, TRADING_STATE_FILE, REPORTS_DIR, SIGNALS_HISTORY_DIR, HISTORICAL_EXECUTION_SIGNALS_FILE
+            
+            self.logger.info("MODALITÀ BACKTEST RILEVATA: Reindirizzamento dei percorsi dati a 'data_backtest'.")
+            
             DATA_DIR = Path("data_backtest")
             DATA_DIR.mkdir(exist_ok=True)
             
             TRADING_STATE_FILE = DATA_DIR / "trading_state.json"
             AI_MODELS_DIR = DATA_DIR / "ai_learning/models"
             PERFORMANCE_DB_FILE = DATA_DIR / "ai_learning/performance.db"
+            REPORTS_DIR = DATA_DIR / "reports"
+            SIGNALS_HISTORY_DIR = DATA_DIR / "signals_history"
+            HISTORICAL_EXECUTION_SIGNALS_FILE = DATA_DIR / "historical_execution_signals.json"
+            
             AI_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            REPORTS_DIR.mkdir(exist_ok=True)
+            SIGNALS_HISTORY_DIR.mkdir(exist_ok=True)
             
             self.state_file = TRADING_STATE_FILE
-            # Fine della parte tecnica.
-        
-            # SECONDA COSA (LA PIÙ IMPORTANTE): Rendiamo il sistema meno esigente.
-            self.logger.info("MODALITÀ BACKTEST: Applico parametri di trading più permissivi per il mercato storico.")
+            self.reports_dir = REPORTS_DIR
+            self.signals_history_dir = SIGNALS_HISTORY_DIR
             
-            self.min_roi_threshold = 5.0      # Mi accontento di un guadagno atteso del 5% (invece che 9%)
-            self.volume_threshold = 1.2       # Mi basta un aumento di volume del 20% (invece che 50%)
-            self.min_signal_quality = 0.8     # Accetto segnali di qualità leggermente inferiore
-            self.rsi_oversold = 35            # Considero un titolo "da comprare" prima (a RSI 35 invece che 30)
-        
-            # Stampo un messaggio per essere sicuro che le modifiche siano state applicate
+            self.logger.info("MODALITÀ BACKTEST: Applico parametri di trading più permissivi.")
+            
+            self.min_roi_threshold = 5.0
+            self.volume_threshold = 1.2
+            self.min_signal_quality = 0.8
+            self.rsi_oversold = 35
+            
             self.logger.info(f"Nuovi parametri per backtest: ROI > {self.min_roi_threshold}%, Volume > {self.volume_threshold}x, RSI < {self.rsi_oversold}")
         # --- FINE BLOCCO MODIFICA PER BACKTEST ---
-        
-        
-        
-        
-        
-        # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
-        # Se stiamo eseguendo un backtest, forza l'uso di una cartella dati separata.
-        # Questo isola il database dell'IA, i modelli e i file di stato del backtest.
-        if 'SIMULATED_DATE' in os.environ:
-            global DATA_DIR, AI_MODELS_DIR, PERFORMANCE_DB_FILE, TRADING_STATE_FILE
-            self.logger.info("MODALITÀ BACKTEST RILEVATA: Reindirizzamento dei percorsi dati.")
-            DATA_DIR = Path("data_backtest")
-            DATA_DIR.mkdir(exist_ok=True)
-            
-            # Ridefinisce tutti i percorsi globali e dell'istanza
-            TRADING_STATE_FILE = DATA_DIR / "trading_state.json"
-            AI_MODELS_DIR = DATA_DIR / "ai_learning/models"
-            PERFORMANCE_DB_FILE = DATA_DIR / "ai_learning/performance.db"
-            AI_MODELS_DIR.mkdir(parents=True, exist_ok=True)
-            
-            # Aggiorna i percorsi nell'istanza dell'engine
-            self.state_file = TRADING_STATE_FILE
-            if hasattr(self, 'meta_orchestrator') and self.meta_orchestrator:
-                 self.meta_orchestrator.performance_learner.db_path = PERFORMANCE_DB_FILE
-# --- FINE BLOCCO MODIFICA PER BACKTEST ---
-        
-        # File paths (compatibilità totale)
+    
+        # File paths (ora vengono aggiornati dal blocco sopra se in modalità backtest)
         self.analysis_data_file = ANALYSIS_DATA_FILE
         self.parameters_file = PARAMETERS_FILE
-        self.signals_history_dir = SIGNALS_HISTORY_DIR
-        self.reports_dir = REPORTS_DIR
         
         # Dati di sessione
         self.analysis_data = {}
         self.market_predictability_data = {}
         self.last_overall_trend = 'unknown'
         
-        # === INIZIALIZZAZIONE AI (nuova) ===
+        # INIZIALIZZAZIONE AI
         self.ai_enabled = True
         self.meta_orchestrator = None
-        # === INIZIALIZZAZIONE REAL ALPHA RESEARCH (nuova) ===
-        # === INIZIALIZZAZIONE REAL ALPHA RESEARCH (nuova) ===
         self.real_alpha_research_enabled = True
         self.real_alpha_research_framework = None
         
-        # Inizializza Alpha Research Framework se abilitato
         if self.real_alpha_research_enabled:
             try:
                 self.real_alpha_research_framework = RealAlphaResearchFramework(data_dir=DATA_DIR)
@@ -2673,21 +2643,14 @@ class IntegratedRevolutionaryTradingEngine:
                 self.real_alpha_research_enabled = False
                 self.real_alpha_research_framework = None
         
-        # --- MODIFICA INIZIO ---
-        # Parametri per l'apprendimento continuo dell'AI
-        self.ai_training_frequency_days = 7  # Addestra ogni 7 giorni
-        self.ai_training_frequency_new_closed_trades = 20  # O ogni 20 trade chiusi
-
-        # Variabili di stato per l'addestramento AI, verranno caricate/salvate
+        # Parametri apprendimento AI
+        self.ai_training_frequency_days = 7
+        self.ai_training_frequency_new_closed_trades = 20
         self.last_ai_training_date = None
         self.total_closed_trades_at_last_ai_training = 0
-        # --- MODIFICA FINE ---
         
-        # GitHub Actions detection (mantenuto)
         if os.environ.get('GITHUB_ACTIONS') == 'true':
             self.logger.info("Running in GitHub Actions environment")
-            
-            # Override parametri se specificato
             force_roi = os.environ.get('FORCE_ROI_THRESHOLD', '')
             if force_roi:
                 try:
@@ -2696,35 +2659,28 @@ class IntegratedRevolutionaryTradingEngine:
                 except:
                     pass
             
-            # Modalità emergenza
             emergency = os.environ.get('EMERGENCY_MODE', 'false').lower() == 'true'
             if emergency:
                 self.logger.info("Emergency mode activated")
                 self.max_signals_per_day = max(1, self.max_signals_per_day // 2)
                 self.max_simultaneous_positions = max(3, self.max_simultaneous_positions // 2)
             
-            # AI configuration
             ai_enabled = os.environ.get('AI_LEARNING_ENABLED', 'true').lower()
             self.ai_enabled = ai_enabled == 'true'
             self.logger.info(f"AI Learning: {'ENABLED' if self.ai_enabled else 'DISABLED'}")
         
-        # Setup logging
-        #self.logger = logging.getLogger(f"{__name__}.IntegratedEngine")
-        
-        # Inizializza AI se abilitata
         if self.ai_enabled:
             try:
                 self.meta_orchestrator = MetaOrchestrator()
+                # Aggiorna il percorso del DB nell'istanza AI dopo che è stata creata
+                if 'SIMULATED_DATE' in os.environ:
+                    self.meta_orchestrator.performance_learner.db_path = PERFORMANCE_DB_FILE
+                
                 self.ai_trade_count = 0
                 self.ai_pattern_discovery_frequency = 25
                 self.ai_evolution_frequency = 50
                 
                 self.logger.info("🧠 INTEGRATED AI SYSTEM INITIALIZED!")
-                self.logger.info("✅ AI Learning: ENABLED (Integrated Mode)")
-                self.logger.info("✅ Performance Learning: ACTIVE")
-                self.logger.info("✅ Meta-Cognitive Enhancement: ACTIVE")
-                self.logger.info("✅ Full System Compatibility: MAINTAINED")
-                
             except Exception as e:
                 self.logger.error(f"AI initialization failed: {e}")
                 self.ai_enabled = False
@@ -2732,16 +2688,10 @@ class IntegratedRevolutionaryTradingEngine:
         else:
             self.logger.info("AI Learning DISABLED - using traditional enhanced mode")
             
-        # === INIZIALIZZAZIONE REAL ALPHA RESEARCH ===
         if self.real_alpha_research_enabled:
             try:
                 self.real_alpha_research_framework = RealAlphaResearchFramework(data_dir=DATA_DIR)
                 self.logger.info("🔬 REAL Alpha Research Framework initialized successfully")
-                self.logger.info("✅ Sector Rotation Analysis: ACTIVE")
-                self.logger.info("✅ VIX Fear & Greed Analysis: ACTIVE") 
-                self.logger.info("✅ Earnings Calendar Effects: ACTIVE")
-                self.logger.info("✅ Volatility Breakout Detection: ACTIVE")
-                self.logger.info("✅ Conservative validation for real money: ACTIVE")
             except Exception as e:
                 self.logger.error(f"Alpha Research Framework initialization failed: {e}")
                 self.real_alpha_research_enabled = False
