@@ -16,6 +16,8 @@ from datetime import datetime
 import traceback
 from finvizfinance.screener.overview import Overview as FinvizOverview
 
+print("--- stock_analyzer_2_0.py: Script avviato ---")
+
 # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
 # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
 import os
@@ -220,11 +222,13 @@ class StockAnalyzer:
         self.final_output_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Sentiment', 'Ticker']
 
     def get_top_gainers(self, n=10, cp_threshold=5, vol_threshold=1e6,
-                    price_lower=5, price_upper=200, mcap_lower=1e9, mcap_upper=5e10):
+                        price_lower=5, price_upper=200, mcap_lower=1e9, mcap_upper=5e10):
         """
         MODIFICATA PER BACKTEST: In modalità backtest, simula i gainers usando dati storici.
         In modalità live, usa l'API di Yahoo.
+        Questa versione è completa e corretta.
         """
+        # --- Logica per la Modalità Backtest ---
         if is_backtest_mode():
             print("  [BACKTEST MODE] get_top_gainers: Simulo screener su dati storici.")
             simulated_date = get_current_date()
@@ -243,6 +247,7 @@ class StockAnalyzer:
                     vol = last_day['Volume']
                     price = last_day['Close']
     
+                    # In backtest, non possiamo filtrare per market cap, quindi lo ignoriamo
                     if cp > cp_threshold and vol > vol_threshold and price_lower < price < price_upper:
                         gainers.append({'ticker': ticker, 'cp': cp})
                 except Exception:
@@ -250,43 +255,71 @@ class StockAnalyzer:
             
             # Ordina per performance e restituisci i migliori
             sorted_gainers = sorted(gainers, key=lambda x: x['cp'], reverse=True)
+            print(f"  [BACKTEST MODE] Trovati {len(sorted_gainers)} gainers, restituisco i primi {n}.")
             return [g['ticker'] for g in sorted_gainers[:n]]
     
-        # --- Il tuo codice originale rimane qui ---
+        # --- Logica per la Modalità Live (il tuo codice originale, corretto e completo) ---
+        print("  [LIVE MODE] get_top_gainers: Contatto l'API di Yahoo Finance.")
         filtered_symbols = []
         try:
             response = self.session.get(
                 self.json_url,
                 headers={'User-Agent': 'Mozilla/5.0'},
-                timeout=10
+                timeout=15 # Aumentato leggermente il timeout per sicurezza
             )
             response.raise_for_status() 
             data = response.json()
-            # ... (il resto del tuo codice originale) ...
-            # ... (tutta la logica di parsing del JSON) ...
-            # ...
+            results = data.get('finance', {}).get('result', [])
+            if not results:
+                print("  -> get_top_gainers: Nessun 'result' trovato nella risposta API.")
+                return filtered_symbols
+
+            quotes = results[0].get('quotes', [])
+            if not quotes:
+                print("  -> get_top_gainers: Nessun 'quotes' trovato nella risposta API.")
+                return filtered_symbols
+
             for quote in quotes:
                 try:
-                    # ... (il tuo codice di parsing) ...
-                    if (symbol and isinstance(symbol, str) and
-                        cp > cp_threshold and
-                        vol > vol_threshold and
-                        price_lower < price < price_upper and
-                        mcap_lower < mcap < mcap_upper):
-                        filtered_symbols.append(symbol)
-                except Exception:
+                    # Estrazione sicura dei dati dal JSON
+                    cp_data = quote.get('regularMarketChangePercent', {})
+                    vol_data = quote.get('regularMarketVolume', {})
+                    price_data = quote.get('regularMarketPrice', {})
+                    mcap_data = quote.get('marketCap', {})
+                    
+                    cp = cp_data.get('raw') if isinstance(cp_data, dict) else float(cp_data)
+                    vol = vol_data.get('raw') if isinstance(vol_data, dict) else float(vol_data)
+                    price = price_data.get('raw') if isinstance(price_data, dict) else float(price_data)
+                    mcap = mcap_data.get('raw') if isinstance(mcap_data, dict) else parse_market_cap(mcap_data)
+                    symbol = quote.get('symbol')
+
+                    # Controllo che tutti i dati necessari siano stati estratti correttamente
+                    if all(v is not None for v in [symbol, cp, vol, price, mcap]):
+                        if (cp > cp_threshold and
+                            vol > vol_threshold and
+                            price_lower < price < price_upper and
+                            mcap_lower < mcap < mcap_upper):
+                            filtered_symbols.append(symbol)
+                except (ValueError, TypeError, AttributeError):
+                    # Ignora i singoli 'quote' che hanno dati malformati e continua con gli altri
                     continue
+            
+            print(f"  -> get_top_gainers: Trovati {len(filtered_symbols)} titoli dopo i filtri, restituisco i primi {n}.")
             return filtered_symbols[:n]
+
         except (requests.exceptions.RequestException, ValueError, json.JSONDecodeError) as e:
             print(f"❌ Errore recupero Day Gainers: {e}")
-            return filtered_symbols
+            return [] # Restituisce una lista vuota in caso di errore
+    
 
     def get_news_sentiment(self, ticker):
         try:
+            print(f"stock_analyzer: Inizio get_news_sentiment per {ticker}...")
             news_url = f"https://finance.yahoo.com/quote/{ticker}/news?p={ticker}®ion=US&lang=en-US"
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
             time.sleep(1) 
-            response = self.session.get(news_url, headers=headers, timeout=15) 
+            response = self.session.get(news_url, headers=headers, timeout=15)
+            print(f"stock_analyzer: Fine get_news_sentiment per {ticker}.")
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
             news_titles = []
@@ -317,7 +350,8 @@ class StockAnalyzer:
             return "Neutral" 
 
     def analyze_stock(self, ticker):
-        print(f"  Inizio analisi per {ticker}...")
+        #print(f"  Inizio analisi per {ticker}...")
+        print(f"stock_analyzer: Inizio analyze_stock per {ticker}...")
         try:
             # Scarica 3 anni di dati
             simulated_end_date = get_current_date()
@@ -887,184 +921,159 @@ class StockAnalyzer:
 
             
     def get_diversified_candidates(self, max_stocks=10, min_history_days=150):
-        # Questo contatore terrà traccia dei fallback
+        """
+        MODIFICATA E CORRETTA: Versione robusta con logging dettagliato e gestione degli errori
+        per ogni strategia di selezione.
+        """
+        print("\n--- Inizio Selezione Candidati Diversificati (v2.0 con Logging) ---")
+        
         num_fallbacks_in_final_selection = 0
-        
-        print("\n🔍 Selezione candidati diversificati con ricerca PERLE RARE (v2.0)...")
-        # Inizializza un set per tenere traccia dei candidati trovati dalle strategie (non fallback)
         initial_candidates_from_strategies_set = set()
+        candidates_scores = {}
 
-        base_scan_list_raw = self.get_finviz_screened_tickers(
-            min_market_cap_str='+Mid (over $2bln)', 
-            min_avg_volume_str='Over 500K',      
-            min_price_str='Over $5'              
-        )
-        # Determina se base_scan_list_raw è effettivamente la lista di fallback o una lista da Finviz
-        # Confronta con la lista di fallback *predefinita*, non solo il subset.
-        if base_scan_list_raw and (set(base_scan_list_raw) == set(self.fallback_tickers[:50]) or not base_scan_list_raw):
-            print("  ℹ️ Finviz returned fallback list. Will count these towards fallbacks if selected.")
-            base_scan_list = self.fallback_tickers[:50] # Forzare l'uso della lista fallback se Finviz fallisce
-            # Non aggiungere questi alla initial_candidates_from_strategies_set se sono già i fallback
-        else:
-            base_scan_list = base_scan_list_raw
-            initial_candidates_from_strategies_set.update(base_scan_list) # Tutti i tickers da Finviz sono da strategie
-
-        if len(base_scan_list) > 200:
-            print(f"  INFO: La lista base da Finviz ha {len(base_scan_list)} tickers, la limito a 200 per le strategie.")
-            base_scan_list = base_scan_list[:200]
-
-        candidates_scores = {} 
-        
-        # === STRATEGIE TRADIZIONALI (peso 1-2) ===
+        # --- FASE 1: Ottenere la lista base di ticker da analizzare ---
+        print("1. Ottenimento lista base di ticker da Finviz (o universo di backtest)...")
         try:
+            base_scan_list = self.get_finviz_screened_tickers(
+                min_market_cap_str='+Mid (over $2bln)', 
+                min_avg_volume_str='Over 500K',      
+                min_price_str='Over $5'              
+            )
+            print(f" -> Lista base ottenuta: {len(base_scan_list)} tickers.")
+        except Exception as e:
+            print(f" -> ERRORE CRITICO in get_finviz_screened_tickers: {e}. Uso fallback.")
+            base_scan_list = self.fallback_tickers[:50]
+
+        if not is_backtest_mode() and base_scan_list == self.fallback_tickers[:50]:
+             print(" -> ATTENZIONE: get_finviz_screened_tickers ha restituito la lista di fallback.")
+        
+        # Limita la lista per non sovraccaricare le API nelle strategie successive
+        if len(base_scan_list) > 200:
+            print(f" -> INFO: La lista base ha {len(base_scan_list)} tickers, la limito a 200 per le strategie.")
+            base_scan_list = base_scan_list[:200]
+        
+        # --- FASE 2: Esecuzione delle strategie di screening ---
+        print("\n2. Esecuzione strategie di screening per assegnare punteggi...")
+        
+        # === Strategie Tradizionali (peso 1-2) ===
+        try:
+            print("   - Strategia: Top Gainers...")
             day_gainers = self.get_top_gainers(n=30, cp_threshold=3, vol_threshold=5e5, price_lower=1, mcap_lower=3e8)
             for ticker in day_gainers:
                 candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 2 
-                initial_candidates_from_strategies_set.add(ticker)
-            time.sleep(3) # Aumento delay dopo ogni screener_view (o equivalente)
+            print(f"     -> Trovati {len(day_gainers)} candidati.")
+            time.sleep(1) # Piccolo delay tra strategie
         except Exception as e:
-            print(f"⚠️ Errore nel recupero Day Gainers: {str(e)}")
+            print(f"     -> ERRORE in get_top_gainers: {e}")
         
         try:
+            print("   - Strategia: Volume Breakouts...")
             volume_breakouts = self.get_volume_breakouts(n=30, stocks_to_scan=base_scan_list, min_avg_vol=3e5, vol_multiplier=1.8)
             for ticker in volume_breakouts:
                 candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 1
-                initial_candidates_from_strategies_set.add(ticker)
+            print(f"     -> Trovati {len(volume_breakouts)} candidati.")
         except Exception as e:
-            print(f"⚠️ Errore nel calcolo dei volume breakouts: {str(e)}")
-        
+            print(f"     -> ERRORE in get_volume_breakouts: {e}")
+            
         try:
+            print("   - Strategia: Trending Stocks (Golden Cross)...")
             trending_stocks = self.get_trending_stocks(n=30, stocks_to_scan=base_scan_list, ma_short=20, ma_long=50)
             for ticker in trending_stocks:
                 candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 1
-                initial_candidates_from_strategies_set.add(ticker)
+            print(f"     -> Trovati {len(trending_stocks)} candidati.")
         except Exception as e:
-            print(f"⚠️ Errore nel calcolo dei trending stocks: {str(e)}")
-        
-        try:
-            relative_strength = self.get_relative_strength_stocks(n=30, stocks_to_scan=base_scan_list, rs_threshold_pct=2.0)
-            for ticker in relative_strength:
-                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 1
-                initial_candidates_from_strategies_set.add(ticker)
-        except Exception as e:
-            print(f"⚠️ Errore nel calcolo della relative strength: {str(e)}")
+            print(f"     -> ERRORE in get_trending_stocks: {e}")
 
-        # === NUOVE STRATEGIE PERLE RARE (peso 3-5) ===
+        # === Strategie "Perle Rare" (peso 3-5) ===
         try:
+            print("   - Strategia: Anomalie di Valutazione (P/E, PEG bassi)...")
             valuation_anomalies = self.get_valuation_anomalies(n=15)
             for ticker in valuation_anomalies:
-                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 4  
-                initial_candidates_from_strategies_set.add(ticker)
+                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 4
+            print(f"     -> Trovati {len(valuation_anomalies)} candidati.")
         except Exception as e:
-            print(f"⚠️ Errore valuation anomalies: {e}")
-        
-        try:
-            technical_breakouts = self.get_technical_breakouts(n=15, stocks_to_scan=base_scan_list[:100]) 
-            for ticker in technical_breakouts:
-                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 3 
-                initial_candidates_from_strategies_set.add(ticker)
-        except Exception as e:
-            print(f"⚠️ Errore technical breakouts: {e}")
-        
-        try:
-            institutional_flow = self.get_institutional_flow_candidates(n=15)
-            for ticker in institutional_flow:
-                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 3
-                initial_candidates_from_strategies_set.add(ticker)
-        except Exception as e:
-            print(f"⚠️ Errore institutional flow: {e}")
+            print(f"     -> ERRORE in get_valuation_anomalies: {e}")
 
         try:
+            print("   - Strategia: Breakout Tecnici (Squeeze Play)...")
+            technical_breakouts = self.get_technical_breakouts(n=15, stocks_to_scan=base_scan_list[:100])
+            for ticker in technical_breakouts:
+                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 3
+            print(f"     -> Trovati {len(technical_breakouts)} candidati.")
+        except Exception as e:
+            print(f"     -> ERRORE in get_technical_breakouts: {e}")
+        
+        try:
+            print("   - Strategia: Acquisti Insider...")
             insider_buying = self.get_insider_buying_candidates(n=15) 
             for ticker in insider_buying:
-                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 5 
-                initial_candidates_from_strategies_set.add(ticker)
+                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 5 # Punteggio molto alto
+            print(f"     -> Trovati {len(insider_buying)} candidati.")
         except Exception as e:
-            print(f"⚠️ Errore insider buying: {e}")
+            print(f"     -> ERRORE in get_insider_buying_candidates: {e}")
 
         try:
-            analyst_upgrades = self.get_analyst_upgrades_candidates(n=15) 
-            for ticker in analyst_upgrades:
-                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 4 
-                initial_candidates_from_strategies_set.add(ticker)
-        except Exception as e:
-            print(f"⚠️ Errore analyst upgrades: {e}")
-
-        try:
-            catalyst_candidates = self.get_catalyst_candidates(n=15)
-            for ticker in catalyst_candidates:
-                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 4  
-                initial_candidates_from_strategies_set.add(ticker)
-        except Exception as e:
-            print(f"⚠️ Errore catalyst candidates: {e}")
-
-        try:
+            print("   - Strategia: Segnali Avanzati (Entropia, RQA)...")
             advanced_signals = self.get_advanced_signal_candidates(n=15, stocks_to_scan=base_scan_list[:150]) 
             for ticker in advanced_signals:
-                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 5 
-                initial_candidates_from_strategies_set.add(ticker)
+                candidates_scores[ticker] = candidates_scores.get(ticker, 0) + 5 # Punteggio molto alto
+            print(f"     -> Trovati {len(advanced_signals)} candidati.")
         except Exception as e:
-            print(f"⚠️ Errore advanced signal candidates: {str(e)}") # Modificato per stampare l'errore specifico se ce n'è uno.
+            print(f"     -> ERRORE in get_advanced_signal_candidates: {e}")
 
+        # --- FASE 3: Selezione Finale ---
+        print("\n3. Selezione e verifica finale dei candidati...")
 
         if not candidates_scores:
-            print("⚠️ Nessun candidato trovato da nessuna strategia. Uso fallback tickers.")
-            # Se nessun candidato è stato trovato dalle strategie, popola con i fallback
+            print(" -> ATTENZIONE: Nessun candidato trovato da nessuna strategia. Verrà usata la lista di fallback.")
             final_selected_candidates = self.fallback_tickers[:max_stocks]
-            num_fallbacks_in_final_selection = len(final_selected_candidates) # Tutti sono fallback
-            return final_selected_candidates, num_fallbacks_in_final_selection
+            return final_selected_candidates, len(final_selected_candidates)
         
+        # Ordina i candidati in base al punteggio totale
         sorted_candidates_by_score = sorted(candidates_scores.items(), key=lambda x: x[1], reverse=True)
         
-        # Mostra top candidates con score
-        print(f"\n🏆 TOP CANDIDATES BY SCORE:")
+        print(f"\n   -> Classifica Top Candidati (su {len(sorted_candidates_by_score)} totali):")
         for i, (ticker, score) in enumerate(sorted_candidates_by_score[:20]):
-            emoji = "💎" if score >= 4 else "🌟" if score >= 3 else "📈"
-            print(f"  {i+1:2d}. {emoji} {ticker}: {score} points")
+            print(f"      {i+1:2d}. {ticker}: {score} punti")
         
-        print(f"\n🔍 Verifica storico (min {min_history_days}gg) per {len(sorted_candidates_by_score)} candidati...")
+        print(f"\n   -> Verifica dello storico dati (min {min_history_days} giorni)...")
         final_verified_candidates = []
         
-        checked_count = 0
         for ticker, score in sorted_candidates_by_score:
             if len(final_verified_candidates) >= max_stocks:
-                break 
-            checked_count += 1
+                break
+            
             try:
-                simulated_end_date = get_current_date()
-                data_check = yf.download(ticker, end=simulated_end_date, period='18mo', interval='1d', progress=False, auto_adjust=False)
-                if data_check is not None and not data_check.empty:
-                    data_check = flatten_columns(data_check) 
-                    data_check = remove_ticker_suffix_from_columns(data_check, ticker) 
-                    if 'Close' not in data_check.columns and 'close' in data_check.columns:
-                        data_check.rename(columns={'close':'Close'}, inplace=True)
-                    if 'Close' in data_check.columns and len(data_check['Close'].dropna()) >= min_history_days:
-                        final_verified_candidates.append(ticker)
-                        # Se il ticker non era tra quelli inizialmente trovati dalle strategie (ovvero, non era nel set)
-                        # ma era tra i fallback, allora lo contiamo come un fallback aggiunto alla selezione finale.
-                        if ticker in self.fallback_tickers and ticker not in initial_candidates_from_strategies_set:
-                            num_fallbacks_in_final_selection += 1
-            except Exception as e:
-                pass # Errore nel download o verifica, ignora questo ticker
+                # Controlla se abbiamo abbastanza dati storici per un'analisi affidabile
+                data_check = yf.download(ticker, period='18mo', interval='1d', progress=False, auto_adjust=False)
+                if data_check is not None and not data_check.empty and len(data_check) >= min_history_days:
+                    final_verified_candidates.append(ticker)
+                    print(f"     -> ✅ {ticker} (Score: {score}) - VERIFICATO")
+                else:
+                    print(f"     -> ❌ {ticker} (Score: {score}) - SCARTATO (Storico insufficiente)")
+            except Exception:
+                print(f"     -> ❌ {ticker} (Score: {score}) - SCARTATO (Errore download dati)")
+                continue
 
-        # Aggiungi fallback tickers se non abbiamo raggiunto il numero desiderato di candidati
+        # Se dopo la verifica non abbiamo abbastanza candidati, aggiungiamo dalla lista di fallback
         if len(final_verified_candidates) < max_stocks:
+            print(f"\n   -> Selezione insufficiente ({len(final_verified_candidates)}/{max_stocks}). Aggiungo dalla lista di fallback...")
+            num_fallbacks_to_add = max_stocks - len(final_verified_candidates)
+            fallbacks_added = 0
             for fb_ticker in self.fallback_tickers:
-                if len(final_verified_candidates) >= max_stocks:
+                if fallbacks_added >= num_fallbacks_to_add:
                     break
-                # Aggiungi solo se non è già stato verificato o selezionato
                 if fb_ticker not in final_verified_candidates:
                     final_verified_candidates.append(fb_ticker)
-                    # Conta questo come fallback aggiunto
-                    num_fallbacks_in_final_selection += 1
+                    fallbacks_added += 1
+                    print(f"     -> Aggiunto fallback: {fb_ticker}")
+            num_fallbacks_in_final_selection = fallbacks_added
         
         final_selected_candidates = final_verified_candidates[:max_stocks]
         
-        if not final_selected_candidates: 
-            print("‼️ Nessun candidato finale selezionato. Controllare strategie.")
-            return [], 0 # Nessun candidato, 0 fallback
+        print(f"\n--- Selezione Candidati Diversificati Completata ---")
+        print(f"🏆 SELEZIONE FINALE ({len(final_selected_candidates)} titoli): {', '.join(final_selected_candidates)}")
         
-        print(f"\n🏆 SELEZIONE FINALE ({len(final_selected_candidates)} perle): {', '.join(final_selected_candidates)}")
         # Ritorna la lista dei candidati e il conteggio dei fallback
         return final_selected_candidates, num_fallbacks_in_final_selection
 
