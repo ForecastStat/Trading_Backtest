@@ -146,7 +146,7 @@ def run_backtest_chunk():
         scripts_to_run = ["best_buy.py", "stock_analyzer_2_0.py", "trading_engine_30_0.py"]
         all_scripts_succeeded = True
         for i, script_name in enumerate(scripts_to_run):
-            result = subprocess.run(["python", script_name], capture_output=True, text=True, check=False)
+            result = subprocess.run(["python", script_name], text=True, check=False)
             if result.returncode != 0:
                 print(f"  - ERRORE FATALE in {script_name}.")
                 print("    --- INIZIO LOG DI ERRORE SCRIPT ---")
