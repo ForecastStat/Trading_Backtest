@@ -1,0 +1,19 @@
+{
+  "capital": 100000.0,
+  "open_positions": [],
+  "trade_history": [],
+  "daily_pnl": [],
+  "portfolio_value_history": [],
+  "parameters": {
+    "min_roi_threshold": 6.7,
+    "max_signals_per_day": 15,
+    "max_simultaneous_positions": 15,
+    "rsi_oversold": 35,
+    "rsi_overbought": 75,
+    "entropy_threshold": 0.8,
+    "determinism_threshold": 0.12,
+    "min_signal_quality": 0.8
+  },
+  "last_updated": "2025-06-22T19:52:25.511861",
+  "system_version": "integrated_v3.0"
+}
