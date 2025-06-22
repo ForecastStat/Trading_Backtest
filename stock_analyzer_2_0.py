@@ -19,7 +19,6 @@ from finvizfinance.screener.overview import Overview as FinvizOverview
 print("--- stock_analyzer_2_0.py: Script avviato ---")
 
 # --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
-# --- INIZIO BLOCCO MODIFICA PER BACKTEST ---
 import os
 from datetime import datetime
 def get_current_date():
@@ -51,8 +50,33 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 analyzer = SentimentIntensityAnalyzer()
 
 # Definisci la directory base per i file di dati
+
+# --- INIZIO BLOCCO GESTIONE PERCORSI (Live & Backtest) ---
+# Questo blocco definisce i percorsi corretti a seconda della modalità di esecuzione.
+
+# Percorsi di default per la modalità LIVE
 BASE_DIR = Path(os.path.dirname(__file__))
-BEST_BUY_FILE = BASE_DIR / 'data' / 'Best_buy.json'
+DATA_DIR_LIVE = BASE_DIR / 'data'
+BEST_BUY_FILE_LIVE = DATA_DIR_LIVE / 'Best_buy.json'
+ANALYSIS_FILE_LIVE = DATA_DIR_LIVE / 'latest_analysis.json'
+
+# Percorsi per la modalità BACKTEST
+DATA_DIR_BACKTEST = BASE_DIR / 'data_backtest'
+BEST_BUY_FILE_BACKTEST = DATA_DIR_BACKTEST / 'Best_buy.json'
+ANALYSIS_FILE_BACKTEST = DATA_DIR_BACKTEST / 'latest_analysis.json'
+
+# Ora, scegliamo quali percorsi usare
+if is_backtest_mode():
+    print("stock_analyzer: Rilevata modalità backtest. Uso percorsi in 'data_backtest'.")
+    BEST_BUY_FILE = BEST_BUY_FILE_BACKTEST
+    # Definiamo una variabile globale per il file di output che useremo dopo
+    ANALYSIS_OUTPUT_FILE = ANALYSIS_FILE_BACKTEST
+else:
+    # Modalità normale/live
+    BEST_BUY_FILE = BEST_BUY_FILE_LIVE
+    ANALYSIS_OUTPUT_FILE = ANALYSIS_FILE_LIVE
+
+# --- FINE BLOCCO GESTIONE PERCORSI ---
 
 # --- FUNZIONI PER INDICATORI AVANZATI (Placeholder/Euristiche) ---
 # Queste funzioni servono SOLO per lo screening interno dello StockAnalyzer,
@@ -1083,7 +1107,8 @@ class StockAnalyzer:
         
 
     def save_analysis_results(self, results, filename_str='data/latest_analysis.json'):
-        filepath = BASE_DIR / filename_str 
+        filepath = ANALYSIS_OUTPUT_FILE
+       
         def custom_serializer(obj):
             if pd.isna(obj) or obj is None:  
                 return None
