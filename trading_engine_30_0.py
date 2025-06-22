@@ -2587,11 +2587,71 @@ class IntegratedRevolutionaryTradingEngine:
         self.genetic_elite_size = 10
         self.logger = logging.getLogger(f"{__name__}.IntegratedEngine")
         
-        # --- INIZIO BLOCCO MODIFICA PER BACKTEST (v3 - Unico e Corretto) ---
+        
+        # --- INIZIO BLOCCO MODIFICA PER BACKTEST (v4 - Unico e Corretto) ---
         if 'SIMULATED_DATE' in os.environ:
-            global DATA_DIR, AI_MODELS_DIR, PERFORMANCE_DB_FILE, TRADING_STATE_FILE, REPORTS_DIR, SIGNALS_HISTORY_DIR, HISTORICAL_EXECUTION_SIGNALS_FILE
+            # Dichiara le variabili globali che modificheremo PRIMA di usarle.
+            global DATA_DIR, AI_MODELS_DIR, PERFORMANCE_DB_FILE, TRADING_STATE_FILE, REPORTS_DIR, SIGNALS_HISTORY_DIR, HISTORICAL_EXECUTION_SIGNALS_FILE, ANALYSIS_DATA_FILE
             
-            self.logger.info("MODALITÀ BACKTEST RILEVATA: Reindirizzamento dei percorsi dati a 'data_backtest'.")
+            self.logger.info("MODALITÀ BACKTEST RILEVATA: Applico configurazioni speciali.")
+            
+            # 1. Rilassa i parametri di trading per il mercato storico
+            self.min_roi_threshold = 5.0
+            self.volume_threshold = 1.2
+            self.min_signal_quality = 0.8
+            self.rsi_oversold = 35
+            self.logger.info(f" -> Parametri per backtest: ROI > {self.min_roi_threshold}%, Volume > {self.volume_threshold}x, RSI < {self.rsi_oversold}")
+            
+            # 2. Reindirizza TUTTI i percorsi dei file alla cartella 'data_backtest'
+            DATA_DIR = Path("data_backtest")
+            DATA_DIR.mkdir(exist_ok=True) # Crea la cartella se non esiste
+            
+            # Ridefinisce tutti i percorsi
+            TRADING_STATE_FILE = DATA_DIR / "trading_state.json"
+            AI_MODELS_DIR = DATA_DIR / "ai_learning/models"
+            PERFORMANCE_DB_FILE = DATA_DIR / "ai_learning/performance.db"
+            REPORTS_DIR = DATA_DIR / "reports"
+            SIGNALS_HISTORY_DIR = DATA_DIR / "signals_history"
+            HISTORICAL_EXECUTION_SIGNALS_FILE = DATA_DIR / "historical_execution_signals.json"
+            ANALYSIS_DATA_FILE = DATA_DIR / "latest_analysis.json"
+            
+            # Crea le sottocartelle necessarie dentro 'data_backtest'
+            AI_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            REPORTS_DIR.mkdir(exist_ok=True)
+            SIGNALS_HISTORY_DIR.mkdir(exist_ok=True)
+            
+            # Aggiorna gli attributi dell'istanza per usare i nuovi percorsi
+            self.state_file = TRADING_STATE_FILE
+            self.reports_dir = REPORTS_DIR
+            self.signals_history_dir = SIGNALS_HISTORY_DIR
+            
+        # Questo blocco viene eseguito SEMPRE, ma i percorsi saranno quelli giusti
+        # a seconda della modalità (live o backtest)
+        if self.ai_enabled:
+            # La classe MetaOrchestrator userà i percorsi globali che abbiamo appena definito
+            self.meta_orchestrator = MetaOrchestrator() 
+            self.logger.info("🧠 Sistema IA inizializzato.")
+            # Se siamo in backtest, forziamo l'IA a usare il database del backtest
+            if 'SIMULATED_DATE' in os.environ:
+                self.meta_orchestrator.performance_learner.db_path = PERFORMANCE_DB_FILE
+                self.meta_orchestrator.performance_learner._init_database()
+        # --- FINE BLOCCO MODIFICA PER BACKTEST ---
+        
+        
+        
+        # --- INIZIO BLOCCO MODIFICA PER BACKTEST (v4 - Correzione Finale) ---
+        if 'SIMULATED_DATE' in os.environ:
+            self.logger.info("MODALITÀ BACKTEST RILEVATA.")
+            
+            # 1. Imposta i parametri rilassati
+            self.min_roi_threshold = 5.0
+            self.volume_threshold = 1.2
+            self.min_signal_quality = 0.8
+            self.rsi_oversold = 35
+            self.logger.info(f" -> Parametri per backtest: ROI > {self.min_roi_threshold}%, Volume > {self.volume_threshold}x, RSI < {self.rsi_oversold}")
+        
+            # 2. Reindirizza i percorsi dei file DOPO aver impostato i parametri
+            global DATA_DIR, AI_MODELS_DIR, PERFORMANCE_DB_FILE, TRADING_STATE_FILE, REPORTS_DIR, SIGNALS_HISTORY_DIR, HISTORICAL_EXECUTION_SIGNALS_FILE
             
             DATA_DIR = Path("data_backtest")
             DATA_DIR.mkdir(exist_ok=True)
@@ -2603,22 +2663,26 @@ class IntegratedRevolutionaryTradingEngine:
             SIGNALS_HISTORY_DIR = DATA_DIR / "signals_history"
             HISTORICAL_EXECUTION_SIGNALS_FILE = DATA_DIR / "historical_execution_signals.json"
             
+            # Ricrea le sottocartelle per sicurezza
             AI_MODELS_DIR.mkdir(parents=True, exist_ok=True)
             REPORTS_DIR.mkdir(exist_ok=True)
             SIGNALS_HISTORY_DIR.mkdir(exist_ok=True)
             
+            # Aggiorna i percorsi nell'istanza dell'engine
             self.state_file = TRADING_STATE_FILE
             self.reports_dir = REPORTS_DIR
             self.signals_history_dir = SIGNALS_HISTORY_DIR
-            
-            self.logger.info("MODALITÀ BACKTEST: Applico parametri di trading più permissivi.")
-            
-            self.min_roi_threshold = 5.0
-            self.volume_threshold = 1.2
-            self.min_signal_quality = 0.8
-            self.rsi_oversold = 35
-            
-            self.logger.info(f"Nuovi parametri per backtest: ROI > {self.min_roi_threshold}%, Volume > {self.volume_threshold}x, RSI < {self.rsi_oversold}")
+        
+        # Questo blocco viene eseguito SEMPRE, ma i percorsi saranno quelli giusti
+        # a seconda della modalità (live o backtest)
+        if self.ai_enabled:
+            self.meta_orchestrator = MetaOrchestrator()
+            # Se siamo in backtest, assicuriamoci che l'IA usi il DB del backtest
+            if 'SIMULATED_DATE' in os.environ:
+                self.meta_orchestrator.performance_learner.db_path = PERFORMANCE_DB_FILE
+                # Forza la re-inizializzazione del DB con il nuovo percorso
+                self.meta_orchestrator.performance_learner._init_database()
+        # --- FINE BLOCCO MODIFICA PER BACKTEST ---
         # --- FINE BLOCCO MODIFICA PER BACKTEST ---
     
         # File paths (ora vengono aggiornati dal blocco sopra se in modalità backtest)
@@ -2703,6 +2767,12 @@ class IntegratedRevolutionaryTradingEngine:
             self.logger.info("Real Alpha Research DISABLED")
     
     # === FUNZIONI CORE SISTEMA ESISTENTE (MANTENUTE IDENTICHE) ===
+    
+    
+    
+    
+    
+    
     
     def get_optimized_parameters_for_regime(self, market_regime):
         """
@@ -3115,36 +3185,21 @@ class IntegratedRevolutionaryTradingEngine:
             self.logger.error(f"Failed to save adaptive parameters: {e}")
     
     
-    def ensure_scalar(self,value):
-        """
-        Assicura che un valore (potenzialmente Series/DataFrame/NumPy) sia uno scalare Python.
-        Gestisce anche NaN/Inf e Timestamp.
-        """
+    def ensure_scalar(self, value):
+        """Assicura che un valore sia uno scalare Python, non una serie di Pandas."""
         if isinstance(value, (pd.Series, pd.DataFrame)):
             if not value.empty:
-                try: return value.item() # Tenta di estrarre un singolo elemento
-                except ValueError: return value.iloc[-1] if isinstance(value, pd.Series) else value.iloc[-1,0] # Se non è scalare, prende l'ultimo/primo elemento
+                try: return value.item()
+                except ValueError: return value.iloc[-1] if isinstance(value, pd.Series) else value.iloc[-1, 0]
             else: return None
-        elif isinstance(value, (np.generic, pd.Timestamp)):
-            if pd.isna(value): return None
-            if isinstance(value, np.bool_): return bool(value)
-            if isinstance(value, np.integer): return int(value)
-            if isinstance(value, np.floating): return float(value)
-            if isinstance(value, pd.Timestamp): return value.isoformat()
-        if isinstance(value, float):
-            if np.isnan(value) or np.isinf(value): return None # Converte NaN/Inf in None
         return value
 
-    def is_valid_indicator(self,value):
-        """
-        Controlla se un valore è valido (non None, non NaN, non Inf, non Serie/DataFrame vuota).
-        """
+    def is_valid_indicator(self, value):
+        """Controlla se un valore è un numero valido (non None, non NaN, non Inf)."""
         if value is None: return False
-        if isinstance(value, (float, int, np.generic)):
-             if np.isnan(value) or np.isinf(value): return False
-        if isinstance(value, (pd.Series, pd.DataFrame)) and value.empty: return False
-        if isinstance(value, pd.Timestamp) and pd.isna(value): return False
-        return True
+        if isinstance(value, (int, float, np.number)):
+            return np.isfinite(value)
+        return False
     
     def _calculate_atr_manual(self, data, length=14):
         """Calcola ATR manualmente come fallback se pandas_ta non è disponibile."""
@@ -3408,44 +3463,7 @@ class IntegratedRevolutionaryTradingEngine:
             self.logger.error(f"Error loading active parameters: {e}")
             return {}, None
     
-    # def save_trading_signals(self, signals, date_obj):
-    #     """Salva segnali generati (identico al sistema esistente + AI metadata)"""
-    #     try:
-    #         date_str = date_obj.strftime('%Y%m%d')
-    #         signals_file = self.signals_history_dir / f"signals_{date_str}.json"
-            
-    #         # Prepara dati segnali (formato identico + AI enhancement info)
-    #         signals_data = {
-    #             'date': date_str,
-    #             'timestamp': datetime.now().isoformat(),
-    #             'signals_count': len(signals),
-    #             'system_version': 'integrated_v3.0',
-    #             'signals': {}
-    #         }
-            
-    #         # Aggiungi metadata AI se disponibile
-    #         if self.ai_enabled:
-    #             ai_summary = {
-    #                 'ai_enabled': True,
-    #                 'ai_processed_signals': len(signals),
-    #                 'ai_enhancement_applied': True
-    #             }
-    #             signals_data['ai_metadata'] = ai_summary
-            
-    #         # Converte segnali mantenendo formato esistente
-    #         for ticker, signal in signals.items():
-    #             signal_data = convert_for_json(signal)
-    #             signals_data['signals'][ticker] = signal_data
-            
-    #         with open(signals_file, 'w') as f:
-    #             json.dump(signals_data, f, indent=2)
-            
-    #         self.logger.info(f"Trading signals saved: {len(signals)} signals to {signals_file}")
-    #         return True
-            
-    #     except Exception as e:
-    #         self.logger.error(f"Error saving trading signals: {e}")
-    #         return False
+ 
         
     # All'interno della classe IntegratedRevolutionaryTradingEngine
 
@@ -5001,149 +5019,96 @@ class IntegratedRevolutionaryTradingEngine:
         
     def generate_sell_signals(self, analysis_data, is_backtest=False):
         """
-        Genera segnali di vendita basati su stop loss, take profit e indicatori tecnici/di caos.
+        Genera segnali di vendita con logica robusta e controlli di validità.
+        Questa versione è tollerante a dati mancanti negli indicatori storici.
         """
         sell_signals = {}
         if not self.open_positions:
-            self.logger.info("No open positions to evaluate for sell signals.")
+            self.logger.info(" -> Nessuna posizione aperta da valutare per la vendita.")
             return sell_signals
 
-        self.logger.info(f"Evaluating {len(self.open_positions)} open positions for sell signals...")
+        self.logger.info(f" -> Valutazione di {len(self.open_positions)} posizioni aperte per segnali di vendita...")
 
-        # Facciamo una copia delle posizioni per evitare problemi di modifica durante l'iterazione
         for position in list(self.open_positions):
             ticker = position.get('ticker')
-            entry_p = position.get('entry')
-            entry_d = position.get('date') # Data di entrata in formato ISO
-            target_p = position.get('take_profit')
-            stop_p = position.get('stop_loss')
-            amount_invested = position.get('amount_invested')
-            qty = position.get('quantity')
-
-            # Validazione dati posizione
-            if not all([ticker, self.is_valid_indicator(entry_p), entry_p > 0, entry_d,
-                        self.is_valid_indicator(qty), qty > 0, self.is_valid_indicator(amount_invested)]):
-                self.logger.warning(f"Skipping sell evaluation for {ticker}: Invalid position data. {position}")
+            entry_price = position.get('entry')
+            entry_date = position.get('date')
+            
+            # Controllo di base sulla validità della posizione
+            if not all([ticker, entry_price, entry_date]):
+                self.logger.warning(f"Salto valutazione vendita per posizione invalida: {position}")
                 continue
 
-            # Applica stop loss e take profit di default se non validi nella posizione
-            # self.active_params non è sempre presente, quindi usa un fallback sicuro per stop_loss_percentage
-            sl_pct_active = getattr(self, 'stop_loss_percentage', 8.0) # Uso getattr per default sicuro
-            stop_p = stop_p if (self.is_valid_indicator(stop_p) and stop_p < entry_p) else entry_p * (1 - sl_pct_active / 100)
-            target_p = target_p if (self.is_valid_indicator(target_p) and target_p > entry_p) else entry_p * (1 + self.take_profit_percentage / 100)
-
+            # Ottieni i dati di analisi più recenti per il ticker
             df = analysis_data.get(ticker)
             if df is None or df.empty or len(df) < 2:
-                self.logger.warning(f"[WARN SellSignal] No/Insufficient data for {ticker} ({len(df) if df is not None else 0} rows), cannot evaluate sell.");
+                self.logger.warning(f"Dati di analisi insufficienti per {ticker}, impossibile valutare la vendita.")
                 continue
 
             last_row = df.iloc[-1]
-            prev_row = df.iloc[-2]
+            current_price = self.ensure_scalar(last_row.get('Close'))
 
-            price = self.ensure_scalar(last_row.get('Close'))
-            if not self.is_valid_indicator(price) or price <= 0:
-                self.logger.warning(f"[WARN SellSignal] Invalid current price for {ticker} ({price}), cannot evaluate sell.");
+            if not self.is_valid_indicator(current_price):
+                self.logger.warning(f"Prezzo corrente invalido per {ticker}, impossibile valutare la vendita.")
                 continue
 
-            current_value = price * qty
-            profit = current_value - amount_invested
-            profit_pct = (profit / amount_invested) * 100 if self.is_valid_indicator(amount_invested) and amount_invested != 0 else 0
-
-            days_held = 'N/A'
+            # Calcolo P/L e giorni in posizione
+            quantity = position.get('quantity', 0)
+            amount_invested = position.get('amount_invested', entry_price * quantity)
+            current_value = current_price * quantity
+            profit_pct = ((current_value / amount_invested) - 1) * 100 if amount_invested > 0 else 0
+            
             try:
-                # Assuming entry_d is in ISO format from Alpaca state sync
-                entry_dt = pd.to_datetime(entry_d)
-                if entry_dt.tz is not None:
-                    entry_dt = entry_dt.tz_localize(None)  # Rimuove il fuso orario
-                entry_dt = entry_dt.normalize()
-                current_dt = pd.Timestamp.now().normalize()
-                days_held = (current_dt - entry_dt).days
-            except Exception as e:
-                self.logger.warning(f"Could not calculate days held for {ticker} ({entry_d}): {e}")
-                days_held = 'N/A' # Reset if calculation fails
+                days_held = (get_current_date() - datetime.fromisoformat(entry_date)).days
+            except:
+                days_held = -1 # Valore che indica un errore
 
-            reason = None
+            # Definizione degli obiettivi di Stop Loss e Take Profit
+            stop_loss_price = entry_price * (1 - self.stop_loss_percentage / 100)
+            take_profit_price = entry_price * (1 + self.take_profit_percentage / 100)
+            
+            sell_reason = None
 
-            # Criteri di vendita prioritari (Stop Loss / Take Profit)
-            if price <= stop_p:
-                reason = f"Stop Loss @{stop_p:.2f} (Current: {price:.2f})"
-                self.logger.info(f"[{ticker}] SELL signal: {reason}. P/L: {profit_pct:+.1f}%")
-            elif price >= target_p:
-                reason = f"Take Profit @{target_p:.2f} (+{profit_pct:.1f}%) (Current: {price:.2f})"
-                self.logger.info(f"[{ticker}] SELL signal: {reason}")
-            else:
-                # Criteri di vendita tecnici/avanzati (se il profitto non è eccessivamente negativo)
-                allow_tech_sell = profit_pct > -5.0 # Solo se la perdita è inferiore al 5% (parametro da configurare)
+            # --- 1. Criteri di Uscita Prioritari (Stop Loss / Take Profit) ---
+            if current_price <= stop_loss_price:
+                sell_reason = f"Stop Loss @{stop_loss_price:.2f}"
+            elif current_price >= take_profit_price:
+                sell_reason = f"Take Profit @{take_profit_price:.2f}"
 
-                if prev_row is not None and not prev_row.empty and allow_tech_sell:
-                    # Indicatori avanzati (Permutation Entropy, RQA Determinism, Signal Quality)
-                    e_val = self.ensure_scalar(last_row.get('PermutationEntropy'))
-                    d_val = self.ensure_scalar(last_row.get('RQA_Determinism'))
-                    sq_val = self.ensure_scalar(last_row.get('SignalQuality'))
-
-                    pe_prev_val = self.ensure_scalar(prev_row.get('PermutationEntropy'))
-                    pd_prev_val = self.ensure_scalar(prev_row.get('RQA_Determinism'))
-                    psq_prev_val = self.ensure_scalar(prev_row.get('SignalQuality'))
-
-                    # Logica per l'exit basata sul caos
-                    if (self.is_valid_indicator(e_val) and self.is_valid_indicator(pe_prev_val) and self.is_valid_indicator(self.entropy_threshold) and
-                        e_val > self.entropy_threshold * 1.05 and e_val > pe_prev_val * 1.1):
-                        reason = f"Alta Entropia Crescente ({pe_prev_val:.2f}->{e_val:.2f})"
-                    elif (self.is_valid_indicator(d_val) and self.is_valid_indicator(pd_prev_val) and self.is_valid_indicator(self.determinism_threshold) and
-                          d_val < self.determinism_threshold * 0.95 and d_val < pd_prev_val * 0.9):
-                        reason = f"Basso Determinismo Calante ({pd_prev_val:.2f}->{d_val:.2f})"
-                    elif (self.is_valid_indicator(sq_val) and self.is_valid_indicator(psq_prev_val) and self.is_valid_indicator(self.min_signal_quality) and
-                          sq_val < self.min_signal_quality * 0.8 and sq_val < psq_prev_val * 0.85):
-                        reason = f"Qualità Segnale in Forte Calo ({psq_prev_val:.2f}->{sq_val:.2f})"
-
-                    # Indicatori tecnici
-                    rsi = self.ensure_scalar(last_row.get('RSI_14'))
-                    p_rsi = self.ensure_scalar(prev_row.get('RSI_14'))
-                    
-                    macd = self.ensure_scalar(last_row.get('MACD'))
-                    p_macd = self.ensure_scalar(prev_row.get('MACD'))
-                    
-                    s50_curr = self.ensure_scalar(last_row.get('SMA_50'))
-                    s50_prev = self.ensure_scalar(prev_row.get('SMA_50'))
-
-                    if reason is None:
-                        # RSI Overbought e inversione
-                        if (self.is_valid_indicator(rsi) and self.is_valid_indicator(p_rsi) and self.is_valid_indicator(self.rsi_sell_threshold) and
-                            rsi > self.rsi_sell_threshold and rsi < p_rsi):
-                            reason = f"RSI Alto&Turn ({rsi:.1f})"
-                        # MACD Bearish Crossover
-                        elif (self.is_valid_indicator(macd) and self.is_valid_indicator(p_macd) and self.is_valid_indicator(self.macd_sell_threshold) and
-                              p_macd > self.macd_sell_threshold and macd < self.macd_sell_threshold):
-                            reason = f"MACD Bearish Turn ({macd:.2f})"
-                        # Prezzo rompe SMA50 dal di sopra (chiusura precedente sopra, attuale sotto)
-                        elif (self.is_valid_indicator(price) and self.is_valid_indicator(s50_curr) and
-                              self.is_valid_indicator(prev_row.get('Close')) and self.is_valid_indicator(s50_prev) and
-                              self.ensure_scalar(prev_row.get('Close')) > s50_prev and price < s50_curr):
-                            reason = f"Break SMA50 Down ({self.ensure_scalar(prev_row.get('Close')):.2f} > {s50_prev:.2f} -> {price:.2f} < {s50_curr:.2f})"
+            # --- 2. Criteri di Uscita Tecnici (se i criteri prioritari non sono scattati) ---
+            if sell_reason is None:
+                rsi = self.ensure_scalar(last_row.get('RSI_14'))
+                macd_hist = self.ensure_scalar(last_row.get('MACD_Histogram'))
                 
-                # Stagnazione (solo se il prezzo non si muove significativamente e la posizione è tenuta a lungo)
-                if reason is None and isinstance(days_held, int):
-                    if abs(price - entry_p) < 0.05 * entry_p: # Meno del 5% di movimento rispetto all'entry
-                        if (days_held > 45 and -2 < profit_pct < 2): # Stagnazione media (1.5 mesi)
-                            reason = f"Stagnation ({days_held}gg, P/L {profit_pct:.1f}%)"
-                        elif (days_held > 75 and profit_pct < 5): # Stagnazione lunga (2.5 mesi)
-                            reason = f"Stagnation Lunga ({days_held}gg, P/L {profit_pct:.1f}%)"
+                # Criterio RSI: Ipercomprato e in calo
+                if self.is_valid_indicator(rsi) and rsi > self.rsi_overbought:
+                     # Idealmente confronteremmo con RSI del giorno prima, ma per robustezza
+                     # vendiamo semplicemente in ipercomprato forte.
+                     sell_reason = f"RSI in zona ipercomprato ({rsi:.1f} > {self.rsi_overbought})"
+                
+                # Criterio MACD: Istogramma diventa negativo (segnale di indebolimento)
+                elif self.is_valid_indicator(macd_hist) and macd_hist < 0:
+                    prev_macd_hist = self.ensure_scalar(df.iloc[-2].get('MACD_Histogram'))
+                    if self.is_valid_indicator(prev_macd_hist) and prev_macd_hist > 0:
+                        sell_reason = "Incrocio ribassista MACD"
 
-            if reason:
-                # Registra il segnale di vendita
+            # --- 3. Criterio di Uscita per Stagnazione (se ancora nessun segnale) ---
+            if sell_reason is None and days_held > 45 and abs(profit_pct) < 3.0:
+                sell_reason = f"Stagnazione ({days_held} giorni con P/L < 3%)"
+
+            # --- Se è stato trovato un motivo per vendere, prepara il segnale ---
+            if sell_reason:
+                self.logger.info(f"  -> ✅ SEGNALE VENDITA per {ticker}: {sell_reason}. (P/L: {profit_pct:.2f}%)")
                 sell_signals[ticker] = {
                     'signal': 'Vendi',
-                    'position': position, # Passa l'intera posizione per riferimento futuro
-                    'current_price': price,
-                    'reason': reason,
-                    'profit': profit,
+                    'position': position,
+                    'current_price': current_price,
+                    'reason': sell_reason,
                     'profit_pct': profit_pct,
-                    'days_held': days_held,
-                    'quantity_to_sell': qty # Indica la quantità da vendere (di solito tutta la posizione)
+                    'quantity_to_sell': quantity
                 }
-                self.logger.info(f"[{ticker}] SELL signal generated: {reason}. P/L: {profit_pct:+.1f}%.")
 
-        self.logger.info(f"Sell signals generated: {len(sell_signals)}.")
+        self.logger.info(f" -> Valutazione vendite completata. Trovati {len(sell_signals)} segnali di vendita.")
         return sell_signals
     
     # === ESECUZIONE TRADE (IDENTICA AL SISTEMA ESISTENTE + AI METADATA) ===
@@ -6303,7 +6268,7 @@ class IntegratedRevolutionaryTradingEngine:
     
     def prepare_signals_for_json_export(self, buy_signals_map, sell_signals_map, max_positions_allowed_today):
         """
-        Prepara i segnali per l'export JSON con LOG DI DEBUG DETTAGLIATO.
+        Prepara i segnali per l'export JSON con LOG DI DEBUG DETTAGLIATO (v3 - Corretta e Semplificata).
         Decide quali trade eseguire in base a ROI, capitale e limiti di posizione.
         """
         # Ordina i potenziali acquisti dal più promettente (ROI più alto) al meno.
@@ -6326,80 +6291,74 @@ class IntegratedRevolutionaryTradingEngine:
             
             self.logger.info(f"--> Valutando acquisto per {ticker}...")
     
-            # --- Filtro 1: Limite massimo di segnali giornalieri ---
+            # --- Filtri Preliminari ---
             if len(prepared_buys) >= self.max_signals_per_day:
                 self.logger.info(f"  -> SCARTATO: Raggiunto limite massimo di acquisti per oggi ({self.max_signals_per_day}).")
-                break # Interrompe il ciclo, non ha senso continuare
+                break
     
-            # --- Filtro 2: Limite massimo di posizioni totali ---
-            # Controlla le posizioni già aperte + quelle che abbiamo già deciso di aprire oggi
             if (len(self.open_positions) + len(prepared_buys)) >= max_positions_allowed_today:
                 self.logger.info(f"  -> SCARTATO: Raggiunto limite massimo di posizioni totali ({max_positions_allowed_today}).")
-                break # Interrompe il ciclo
+                break
     
-            # --- Filtro 3: Posizione già aperta ---
             if ticker in [pos['ticker'] for pos in self.open_positions]:
                 self.logger.info(f"  -> SCARTATO: Esiste già una posizione aperta per {ticker}.")
-                continue # Passa al prossimo ticker
+                continue
     
-            # --- Filtro 4: Soglia minima di ROI (Rendimento su Investimento) ---
             ref_score = signal_data.get('ai_enhanced_roi', signal_data.get('ref_score_or_roi', 0))
             if ref_score < self.min_roi_threshold:
                 self.logger.info(f"  -> SCARTATO: ROI Atteso ({ref_score:.2f}%) è inferiore alla soglia minima ({self.min_roi_threshold:.2f}%).")
-                continue # Passa al prossimo ticker
+                continue
             
-            # --- Filtro 5: Validità del prezzo ---
             current_price = self.ensure_scalar(signal_data.get('entry_price'))
             if not self.is_valid_indicator(current_price) or not (self.min_price <= current_price <= self.max_price):
-                self.logger.warning(f"  -> SCARTATO: Prezzo ${current_price:.2f} è invalido o fuori dal range consentito (${self.min_price:.2f}-${self.max_price:.2f}).")
-                continue # Passa al prossimo ticker
+                self.logger.warning(f"  -> SCARTATO: Prezzo ${current_price:.2f} invalido o fuori range (${self.min_price:.2f}-${self.max_price:.2f}).")
+                continue
     
-            # Se arriva qui, il segnale è buono. Ora calcoliamo quanto comprare.
             self.logger.info(f"  -> OK: {ticker} ha passato i filtri preliminari con ROI {ref_score:.2f}%. Calcolo dimensione posizione...")
     
-            # --- Calcolo della Quantità da Acquistare (Position Sizing) ---
+            # --- Inizio Blocco Calcolo Quantità (Position Sizing) ---
             try:
-                # Usa l'ATR (Average True Range) per un dimensionamento basato sulla volatilità
-                indicators = signal_data.get('indicators', {})
-                atr = safe_float_conversion(indicators.get('ATR'), current_price * 0.02) # Fallback al 2% del prezzo
-                stop_distance_per_share = atr * 2.0 # Stop loss a 2 volte l'ATR
-                
-                # Limita lo stop loss a una percentuale massima per sicurezza
-                max_stop_distance = current_price * (12.0 / 100) # Max 12% di stop
-                stop_distance_per_share = min(stop_distance_per_share, max_stop_distance)
-                
-                if stop_distance_per_share <= 0: stop_distance_per_share = current_price * 0.08 # Fallback di sicurezza
-    
-                # Calcola quanto investire in base al rischio
+                # 1. Calcola il rischio massimo in dollari che sei disposto a perdere su questo trade
                 max_risk_per_trade = self.capital * (self.risk_per_trade_percent / 100)
-                quantity_estimated = math.floor(max_risk_per_trade / stop_distance_per_share)
                 
-                # Applica il moltiplicatore dell'IA se presente
+                # 2. Calcola la distanza dello stop-loss per azione (quanto perdi se lo stop viene colpito)
+                indicators = signal_data.get('indicators', {})
+                atr = safe_float_conversion(indicators.get('ATR'), current_price * 0.02)
+                stop_distance_per_share = atr * 2.0  # Un valore comune è 2x ATR
+                stop_distance_per_share = min(stop_distance_per_share, current_price * 0.12) # Limite di sicurezza al 12%
+                if stop_distance_per_share <= 0: stop_distance_per_share = current_price * 0.08 # Fallback
+                
+                # 3. Calcola la quantità di azioni basata sul rischio
+                if stop_distance_per_share > 0:
+                    quantity_estimated = math.floor(max_risk_per_trade / stop_distance_per_share)
+                else:
+                    quantity_estimated = 0
+    
+                # 4. Applica il moltiplicatore dell'IA
                 ai_multiplier = signal_data.get('ai_size_multiplier', 1.0)
                 quantity_estimated = math.floor(quantity_estimated * ai_multiplier)
     
+                # 5. Applica i limiti di valore assoluto (min e max trade)
                 trade_value = quantity_estimated * current_price
-    
-                # Applica limiti minimi e massimi di investimento
                 if trade_value > self.max_trade_amount:
                     quantity_estimated = math.floor(self.max_trade_amount / current_price)
-                if trade_value < self.min_trade_amount:
+                if trade_value > 0 and trade_value < self.min_trade_amount:
                      quantity_estimated = math.ceil(self.min_trade_amount / current_price)
                 
-                trade_value = quantity_estimated * current_price # Ricalcola il valore finale
+                trade_value = quantity_estimated * current_price
     
-                # --- Filtro 6: Capitale Disponibile ---
+                # --- Filtro Finale: Capitale Disponibile ---
                 if trade_value > simulated_available_capital:
                     self.logger.warning(f"  -> SCARTATO: Capitale insufficiente. Richiesto ${trade_value:,.2f}, disponibile ${simulated_available_capital:,.2f}.")
                     continue
     
                 if quantity_estimated <= 0:
-                    self.logger.warning(f"  -> SCARTATO: La quantità calcolata è zero o negativa.")
+                    self.logger.warning(f"  -> SCARTATO: La quantità calcolata finale è zero o negativa.")
                     continue
                 
                 # --- Preparazione Finale del Segnale di Acquisto ---
                 stop_loss_price = current_price - stop_distance_per_share
-                take_profit_price = current_price + (stop_distance_per_share * 1.5) # R:R di 1.5
+                take_profit_price = current_price + (stop_distance_per_share * 1.5)
     
                 buy_to_export = {
                     "ticker": ticker,
@@ -6413,13 +6372,13 @@ class IntegratedRevolutionaryTradingEngine:
                 }
                 
                 prepared_buys.append(buy_to_export)
-                simulated_available_capital -= trade_value # Aggiorna il capitale fittizio
+                simulated_available_capital -= trade_value
                 
-                self.logger.info(f"  -> ✅ SEGNALE ACQUISTO PREPARATO: {int(quantity_estimated)} azioni di {ticker} per ${trade_value:,.2f}. Capitale simulato rimanente: ${simulated_available_capital:,.2f}")
+                self.logger.info(f"  -> ✅ SEGNALE ACQUISTO PREPARATO: {int(quantity_estimated)} azioni di {ticker} per ${trade_value:,.2f}. Capitale rimanente: ${simulated_available_capital:,.2f}")
     
             except Exception as e:
                 self.logger.error(f"  -> ERRORE CRITICO durante il calcolo della quantità per {ticker}: {e}")
-                continue # Salta al prossimo ticker in caso di errore
+                continue
     
         # --- 2. Processo Segnali di Vendita ---
         if sell_signals_map:
@@ -7134,96 +7093,74 @@ class IntegratedRevolutionaryTradingEngine:
 # === MAIN EXECUTION ===
 
 def main():
-    """Funzione principale di esecuzione"""
-    print("trading_engine: Funzione main avviata.")
+    """
+    Funzione principale di esecuzione, corretta per una gestione robusta e un logging chiaro.
+    """
     main_logger = logging.getLogger('MainExecution')
     
     try:
-        main_logger.info("🚀 INTEGRATED REVOLUTIONARY TRADING SYSTEM STARTING...")
-        main_logger.info("=" * 80)
-        main_logger.info("🔧 System: trading_engine_23_0.py + trading_engine_30_0.py INTEGRATED")
-        main_logger.info("🧠 AI: Revolutionary Enhancement Layer")
-        main_logger.info("📊 Compatibility: 100% with existing system")
-        main_logger.info("=" * 80)
+        main_logger.info("====================================================================")
+        main_logger.info("🚀 AVVIO SISTEMA DI TRADING RIVOLUZIONARIO INTEGRATO 🚀")
+        main_logger.info("====================================================================")
         
-        # Inizializza engine integrato
-        # CONSIGLIO: Mantieni min_roi_threshold a 9.0 per il deploy reale, non abbassarlo
-        # per "fare apprendere" l'AI, l'AI imparerà comunque dalla storia dei trade.
+        # Inizializza l'engine di trading. I parametri di backtest (come le soglie rilassate)
+        # vengono impostati automaticamente all'interno di __init__ se rileva la modalità backtest.
         engine = IntegratedRevolutionaryTradingEngine(
             capital=100000,
             state_file='data/trading_state.json',
-            min_roi_threshold=9.0 # RIPORTATO A 9.0 PER PRODUZIONE NORMALE
+            min_roi_threshold=9.0 # Questo è il valore di default per il live trading
         )
+        main_logger.info(" -> Oggetto Engine creato con successo.")
         
-        print("trading_engine: Oggetto Engine creato. Avvio sessione di trading...")
-        
-        #########################################################
-        # 🚨 GESTIONE BOOTSTRAP MODE E STATO AI
-        #
-        # Qui controlliamo e stampiamo lo stato dell'AI.
-        # L'AI è 'ENABLED' di default nell'init dell'engine.
-        # La logica di disabilitazione temporanea per il bootstrap (sotto gli 80 trade)
-        # è ora gestita INTERNAMENTE a run_integrated_trading_session.
-        # Questo blocco serve solo a fornire un riepilogo pulito.
-        #########################################################
-        
-        # Esegui sessione trading completa
+        # Esegui la sessione di trading principale. Questa funzione ora si occupa solo
+        # della generazione dei segnali. L'esecuzione vera e propria è simulata dal backtester.
         success = engine.run_integrated_trading_session()
-        
-        # === INIZIO: TABELLINA DI RIEPILOGO FINALE ===
+        main_logger.info(f" -> Sessione di generazione segnali terminata. Stato: {'SUCCESSO' if success else 'FALLITO'}")
+
+        # === INIZIO: TABELLINA DI RIEPILOGO FINALE (Corretta) ===
         main_logger.info("\n" + "=" * 60)
-        main_logger.info("📊 FINAL SESSION SUMMARY 📊".center(60))
+        main_logger.info("📊 RIEPILOGO FINALE DELLA SESSIONE 📊".center(60))
         main_logger.info("=" * 60)
         
-        # 4) L'indicazione se l'AI è attiva o disabilitata
-        ai_status_str = "🟢 ENABLED" if engine.ai_enabled else "🔴 DISABLED (BOOTSTRAP MODE)"
-        main_logger.info(f"AI Status: {ai_status_str}")
+        ai_status_str = "🟢 ATTIVA" if engine.ai_enabled else "🔴 DISATTIVATA"
+        main_logger.info(f"Stato Generale IA: {ai_status_str}")
         
-        # 1) Quanti trade ci sono e quanti ne mancano per attivare l'AI, QUANTI SONO NEL DB E QUANTI NEL FILE DI STATO
-        final_closed_trades_in_db = engine.current_closed_ai_trades # Preso dall'engine
-        ai_training_threshold = 80 # Il valore hardcoded in train_model
+        if engine.ai_enabled and engine.meta_orchestrator:
+            # Usa getattr per accedere in modo sicuro all'attributo, con 0 come default
+            final_closed_trades_in_db = getattr(engine, 'current_closed_ai_trades', 0)
+            ai_training_threshold = 80
+            
+            main_logger.info("-" * 60)
+            main_logger.info("Progresso Apprendimento IA:")
+            main_logger.info(f"  Trade Chiusi nel Database IA: {final_closed_trades_in_db}")
+            
+            remaining_trades = max(0, ai_training_threshold - final_closed_trades_in_db)
+            if remaining_trades > 0:
+                main_logger.info(f"  -> 🚀 BOOTSTRAP MODE ATTIVO (Mancano {remaining_trades} trade per l'attivazione completa dell'IA)")
+            else:
+                main_logger.info(f"  -> 🧠 FULL AI MODE ATTIVO (Modello addestrato e operativo)")
         
         main_logger.info("-" * 60)
-        main_logger.info("AI Training Data Progress:")
-        main_logger.info(f"  Closed Trades (AI Database): {final_closed_trades_in_db}")
-        main_logger.info(f"  Needed for AI Training: {ai_training_threshold}")
-        main_logger.info(f"  Remaining for Activation: {max(0, ai_training_threshold - final_closed_trades_in_db)}")
+        main_logger.info("Segnali Preparati per Esecuzione:")
+        buy_count = getattr(engine, 'last_prepared_buys_count', 0)
+        sell_count = getattr(engine, 'last_prepared_sells_count', 0)
+        main_logger.info(f"  Segnali di Acquisto: {buy_count}")
+        main_logger.info(f"  Segnali di Vendita: {sell_count}")
         
-        # 2) Quanti segnali di vendita e di acquisto sono stati generati
-        main_logger.info("-" * 60)
-        main_logger.info("Signals Generated & Prepared:")
-        main_logger.info(f"  Buy Signals Prepared for Executor: {engine.last_prepared_buys_count}")
-        main_logger.info(f"  Sell Signals Prepared for Executor: {engine.last_prepared_sells_count}")
-        
-        # 3) dove devo intervenire per riabilitare l'AI quando sarà il momento
-        main_logger.info("-" * 60)
-        main_logger.info("AI Re-enable Instruction:")
-        main_logger.info("  The AI is currently set to 'ENABLED' in the engine's __init__.")
-        main_logger.info("  Its operational status ('DISABLED' above) is due to insufficient training data.")
-        main_logger.info("  It will AUTOMATICALLY activate when 'Closed Trades (AI Database)' reaches 80+.")
-        main_logger.info("  NO MANUAL INTERVENTION IS NEEDED unless you explicitly set 'engine.ai_enabled = False' in main().")
-        main_logger.info("  If AI is '🔴 DISABLED' due to environment variable (AI_LEARNING_ENABLED=false), set it to 'true'.")
         main_logger.info("=" * 60)
         # === FINE: TABELLINA DI RIEPILOGO FINALE ===
 
         if success:
-            main_logger.info("🎉 INTEGRATED TRADING SESSION COMPLETED SUCCESSFULLY!")
-            main_logger.info("✅ All systems operational")
-            main_logger.info("✅ Traditional system features preserved")
-            main_logger.info("✅ AI enhancement applied")
-            main_logger.info("✅ Full compatibility compatibility maintained") # Typo: "compatibility" twice
+            main_logger.info("🎉 ESECUZIONE SCRIPT COMPLETATA CON SUCCESSO!")
         else:
-            main_logger.warning("⚠️ TRADING SESSION COMPLETED WITH ISSUES")
-            main_logger.warning("🔄 Check logs for details")
-            main_logger.warning("🛡️ System failsafes activated")
-            
-        print(f"trading_engine: Sessione di trading terminata con successo={success}.")
+            main_logger.warning("⚠️ ESECUZIONE SCRIPT COMPLETATA CON ERRORI. Controllare i log precedenti.")
         
         return success
         
     except Exception as e:
-        main_logger.error(f"🚨 CRITICAL ERROR: {e}")
-        main_logger.error("🛠️ System shutdown for safety")
+        main_logger.error(f"🚨 ERRORE CRITICO IRREVERSIBILE IN main(): {e}")
+        main_logger.error(traceback.format_exc())
+        main_logger.error("🛠️ Arresto di sicurezza del sistema.")
         return False
 
 if __name__ == "__main__":
