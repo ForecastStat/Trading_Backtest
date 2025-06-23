@@ -10,3 +10,4 @@ scikit-learn
 certifi
 pytz
 scipy
+websockets<11.0
