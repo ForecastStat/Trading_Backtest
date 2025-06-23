@@ -1,0 +1,12 @@
+# requirements.txt
+pandas
+yfinance
+requests
+finvizfinance
+beautifulsoup4
+vaderSentiment
+pandas-ta
+scikit-learn
+certifi
+pytz
+scipy
