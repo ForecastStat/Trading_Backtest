@@ -322,9 +322,27 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
             run_analysis_for_date(tickers_to_analyze, all_historical_data, current_date, ANALYSIS_FILE_PATH)
             
             # Istanza del trading engine con stato corrente
+            # CORREZIONE: Converti le posizioni nel formato atteso dal trading engine
+            trading_engine_positions = []
+            for pos in open_positions:
+                trading_engine_pos = {
+                    'ticker': pos['ticker'],
+                    'entry_p': pos['entry_price'],  # Il trading engine cerca 'entry_p'
+                    'entry_d': pos['entry_date'].strftime('%Y-%m-%d'),  # Il trading engine cerca 'entry_d' come string
+                    'quantity': pos['quantity'],
+                    'trade_value': pos['trade_value'],
+                    'entry_price': pos['entry_price'],  # Mantieni anche l'originale
+                    'entry_date': pos['entry_date'],
+                    'stop_loss': pos.get('stop_loss'),
+                    'take_profit': pos.get('take_profit'),
+                    'position_id': f"{pos['ticker']}_{pos['entry_date'].strftime('%Y%m%d')}_{int(pos['entry_price']*100)}"
+                }
+                trading_engine_positions.append(trading_engine_pos)
+            
+            # Istanza del trading engine con stato corrente
             engine = IntegratedRevolutionaryTradingEngine(
                 capital=capital,
-                open_positions=open_positions,
+                open_positions=trading_engine_positions,  # Usa le posizioni convertite
                 performance_db_path=str(AI_DB_FILE)
             )
             
