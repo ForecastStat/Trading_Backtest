@@ -274,7 +274,12 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
         portfolio_value = capital
         for pos in open_positions:
             try:
-                current_price = all_historical_data[pos['ticker']].loc[current_date_str]['Close']
+                current_price_data = all_historical_data[pos['ticker']].loc[current_date_str]['Close']
+                # CORREZIONE: Assicurati che sia un numero singolo
+                if hasattr(current_price_data, 'iloc'):
+                    current_price = float(current_price_data.iloc[0])
+                else:
+                    current_price = float(current_price_data)
                 portfolio_value += pos['quantity'] * current_price
             except:
                 portfolio_value += pos['trade_value']  # Fallback al valore di acquisto
@@ -357,7 +362,9 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
         print(f"📊 Posizioni aperte da liquidare: {len(open_positions)}")
         for pos in open_positions:
             try:
-                last_price = all_historical_data[pos['ticker']]['Close'].iloc[-1]
+                last_price_data = all_historical_data[pos['ticker']]['Close'].iloc[-1]
+                # CORREZIONE: Assicurati che sia un numero singolo
+                last_price = float(last_price_data)
                 position_value = pos['quantity'] * last_price
                 final_portfolio_value += position_value
                 print(f"  - {pos['ticker']}: {pos['quantity']} azioni @ ${last_price:.2f} = ${position_value:,.2f}")
