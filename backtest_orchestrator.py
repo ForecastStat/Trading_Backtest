@@ -324,33 +324,16 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
             # Istanza del trading engine con stato corrente
             # CORREZIONE: Converti le posizioni nel formato atteso dal trading engine
             # CORREZIONE: Converti le posizioni nel formato atteso dal trading engine
-            trading_engine_positions = []
-            for pos in open_positions:
-                # SICUREZZA: Assicurati che tutti i valori numerici non siano None
-                entry_price = pos['entry_price'] if pos['entry_price'] is not None else 0.0
-                quantity = pos['quantity'] if pos['quantity'] is not None else 0.0
-                trade_value = pos['trade_value'] if pos['trade_value'] is not None else 0.0
-                
-                # Crea la posizione solo se ha dati validi
-                if entry_price > 0 and quantity > 0:
-                    trading_engine_pos = {
-                        'ticker': pos['ticker'],
-                        'entry_p': entry_price,  # Ora è sempre un numero, mai None
-                        'entry_d': pos['entry_date'].strftime('%Y-%m-%d'),
-                        'quantity': quantity,
-                        'trade_value': trade_value,
-                        'entry_price': entry_price,
-                        'entry_date': pos['entry_date'],
-                        'stop_loss': pos.get('stop_loss'),
-                        'take_profit': pos.get('take_profit'),
-                        'position_id': f"{pos['ticker']}_{pos['entry_date'].strftime('%Y%m%d')}_{int(entry_price*100)}"
-                    }
-                    trading_engine_positions.append(trading_engine_pos)
+            # SOLUZIONE DEFINITIVA: Trading engine isolato per generazione segnali
+            # L'orchestratore gestisce autonomamente le posizioni, il trading engine
+            # si occupa solo di generare segnali di acquisto senza interferenze
+            print(f"    🔧 Inizializzazione trading engine isolato (posizioni gestite dall'orchestratore)")
+            print(f"    📊 Posizioni attive nell'orchestratore: {len(open_positions)}")
             
-            # Istanza del trading engine con stato corrente
+            # Istanza del trading engine SENZA posizioni per evitare conflitti
             engine = IntegratedRevolutionaryTradingEngine(
                 capital=capital,
-                open_positions=trading_engine_positions,  # Usa le posizioni convertite
+                open_positions=[],  # LISTA VUOTA: l'orchestratore gestisce tutto
                 performance_db_path=str(AI_DB_FILE)
             )
             
