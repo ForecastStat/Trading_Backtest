@@ -1,7 +1,5 @@
 # backtest_orchestrator.py
 
-# backtest_orchestrator.py
-
 # ==============================================================================
 # --- PATCH DI COMPATIBILITÀ PER NUMPY 2.0 ---
 # Questo blocco risolve l'errore 'cannot import name 'NaN' from 'numpy''.
@@ -140,19 +138,19 @@ def pre_fetch_all_historical_data(tickers):
 # --- FASE 3: ESECUZIONE DEL LOOP DI SIMULAZIONE GIORNALIERA ---
 # ==============================================================================
 
+# In backtest_orchestrator.py, sostituisci l'intera funzione run_backtest_simulation
+
 def run_backtest_simulation(all_historical_data, tickers_to_analyze):
     """
     Il cuore del backtest. Simula il passare dei giorni e orchestra gli script.
     """
     print("\n--- FASE 3: INIZIO SIMULAZIONE DI TRADING GIORNALIERA ---")
     
-    # --- Stato del Portafoglio ---
     capital = INITIAL_CAPITAL
     open_positions = []
     closed_trades_for_csv = []
 
-    # --- Loop Giornaliero ---
-    date_range = pd.date_range(start=START_DATE, end=END_DATE, freq='B') # 'B' = Business Day
+    date_range = pd.date_range(start=START_DATE, end=END_DATE, freq='B')
     sp500_data = all_historical_data['^GSPC']
 
     for current_date in date_range:
@@ -160,9 +158,8 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
         print(f"\n{'='*20} SIMULAZIONE GIORNO: {current_date_str} {'='*20}")
         print(f"Stato: Capitale ${capital:,.2f}, Posizioni Aperte: {len(open_positions)}")
         
-        # --- 3.1: Chiama lo Stock Analyzer per generare il file di analisi del giorno ---
+        # 3.1: Stock Analyzer
         print("  - 3.1: Esecuzione Stock Analyzer (offline)...")
-        # Questa funzione simula l'output di 2_stock_analyzer_2_0.py
         run_analysis_for_date(
             tickers_to_analyze=tickers_to_analyze,
             all_historical_data=all_historical_data,
@@ -170,42 +167,44 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
             output_path=ANALYSIS_FILE_PATH
         )
 
-        # --- 3.2: Esegui il Trading Engine ---
+        # 3.2: Trading Engine
         print("  - 3.2: Esecuzione Trading Engine (con stato attuale)...")
-        # Istanziamo l'engine con lo stato corrente del portafoglio.
-        # Questo bypassa la necessità dell'engine di leggere/scrivere il suo stato da file.
         engine = IntegratedRevolutionaryTradingEngine(
             capital=capital,
             open_positions=open_positions,
-            # Passa il percorso del DB AI. Questo è cruciale per l'apprendimento persistente.
-            # L'engine userà sempre lo stesso file DB, che crescerà con ogni trade chiuso.
             performance_db_path=AI_DB_FILE
         )
-        
-        # Esegui la logica principale dell'engine per il giorno corrente.
         engine.run_integrated_trading_session_for_backtest(
             analysis_data_path=ANALYSIS_FILE_PATH,
             sp500_data_full=sp500_data,
             current_backtest_date=current_date
         )
 
-        # --- 3.3: Processa i segnali di Esecuzione (Acquisti e Vendite) ---
+        # 3.3: Processa i segnali
         print("  - 3.3: Processamento segnali di esecuzione generati...")
         if not EXECUTION_SIGNALS_FILE.exists():
-            print("    Nessun file execution_signals.json generato per oggi.")
+            print("    [LOG CHIARIFICATORE] Nessun file execution_signals.json generato oggi. Nessuna azione intrapresa.")
             continue
         
         with open(EXECUTION_SIGNALS_FILE, 'r') as f:
-            signals = json.load(f).get('signals', {})
+            content = f.read()
+            if not content:
+                print("    [LOG CHIARIFICATORE] Il file execution_signals.json è VUOTO. Nessuna azione intrapresa.")
+                continue
+            signals = json.loads(content).get('signals', {})
         
         buy_signals = signals.get('buys', [])
         sell_signals = signals.get('sells', [])
 
-        # Trova il giorno di trading successivo per l'esecuzione
+        # ==============================================================================
+        # --- LOG CHIARIFICATORE ---
+        print(f"    [LOG CHIARIFICATORE] Trovati {len(buy_signals)} segnali di ACQUISTO e {len(sell_signals)} di VENDITA da processare.")
+        # ==============================================================================
+
         next_trading_day = current_date + pd.tseries.offsets.BDay(1)
         next_trading_day_str = next_trading_day.strftime('%Y-%m-%d')
 
-        # --- Processa le VENDITE PRIMA, per liberare capitale ---
+        # Processa vendite
         if sell_signals:
             positions_to_remove = []
             for sell_signal in sell_signals:
@@ -214,76 +213,44 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
                 
                 if position_to_close:
                     try:
-                        # Prendi il prezzo di apertura del giorno successivo per la vendita
                         exit_price = all_historical_data[ticker].loc[next_trading_day_str]['Open']
                         quantity = position_to_close['quantity']
-                        
                         exit_value = exit_price * quantity
                         capital += exit_value
-                        
                         print(f"    -> VENDITA ESEGUITA: {quantity} di {ticker} @ ${exit_price:.2f}. Capitale: ${capital:,.2f}")
-
-                        # Registra il trade chiuso per il CSV finale
-                        closed_trades_for_csv.append({
-                            'entry_price': position_to_close['entry_price'],
-                            'exit_price': exit_price,
-                            'quantity': quantity
-                        })
-                        
-                        # Segna la posizione da rimuovere dalla lista delle posizioni aperte
+                        closed_trades_for_csv.append({'entry_price': position_to_close['entry_price'], 'exit_price': exit_price, 'quantity': quantity})
                         positions_to_remove.append(position_to_close)
-
-                    except KeyError:
-                        print(f"    ATTENZIONE: Nessun dato per {ticker} il {next_trading_day_str}. Vendita non eseguita.")
                     except Exception as e:
-                        print(f"    ERRORE ESECUZIONE VENDITA {ticker}: {e}")
-
-            # Rimuovi le posizioni chiuse
+                        print(f"    ATTENZIONE: Esecuzione vendita {ticker} fallita. Errore: {e}")
             open_positions = [p for p in open_positions if p not in positions_to_remove]
 
-        # --- Processa gli ACQUISTI DOPO, usando il capitale aggiornato ---
+        # Processa acquisti
         if buy_signals:
             for buy_signal in buy_signals:
                 ticker = buy_signal['ticker']
                 quantity = buy_signal['quantity_estimated']
                 
                 try:
-                    # Prendi il prezzo di apertura del giorno successivo per l'acquisto
                     entry_price = all_historical_data[ticker].loc[next_trading_day_str]['Open']
                     trade_value = entry_price * quantity
                     
                     if capital >= trade_value:
                         capital -= trade_value
-                        
-                        # Aggiungi alla lista delle posizioni aperte
-                        open_positions.append({
-                            'ticker': ticker,
-                            'entry_price': entry_price,
-                            'quantity': quantity,
-                            'entry_date': next_trading_day, # Data di ingresso reale
-                            'trade_value': trade_value
-                        })
+                        open_positions.append({'ticker': ticker, 'entry_price': entry_price, 'quantity': quantity, 'entry_date': next_trading_day, 'trade_value': trade_value})
                         print(f"    -> ACQUISTO ESEGUITO: {quantity} di {ticker} @ ${entry_price:.2f}. Capitale: ${capital:,.2f}")
                     else:
                         print(f"    ACQUISTO SALTATO: {ticker} - Capitale insufficiente (${trade_value:,.2f} > ${capital:,.2f}).")
-
-                except KeyError:
-                    print(f"    ATTENZIONE: Nessun dato per {ticker} il {next_trading_day_str}. Acquisto non eseguito.")
                 except Exception as e:
-                    print(f"    ERRORE ESECUZIONE ACQUISTO {ticker}: {e}")
+                    print(f"    ATTENZIONE: Esecuzione acquisto {ticker} fallita. Errore: {e}")
 
-    # --- Fine del loop di simulazione ---
     print("\n--- SIMULAZIONE COMPLETATA ---")
-    
-    # Calcola il valore finale del portafoglio
     final_portfolio_value = capital
     for pos in open_positions:
         try:
             last_price = all_historical_data[pos['ticker']].loc[END_DATE]['Close']
             final_portfolio_value += pos['quantity'] * last_price
         except:
-            final_portfolio_value += pos['trade_value'] # Usa il valore di acquisto se non c'è prezzo finale
-
+            final_portfolio_value += pos['trade_value']
     return closed_trades_for_csv, final_portfolio_value
 
 
