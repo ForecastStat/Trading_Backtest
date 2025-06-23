@@ -2538,10 +2538,10 @@ class IntegratedRevolutionaryTradingEngine:
         self.take_profit_percentage = 15.0
         self.position_size_base = 0.05
         self.risk_per_trade_percent = 5.0
-        self.min_roi_threshold = 9.0
+        self.min_roi_threshold = 7.0
         
         # Parametri tecnici (mantenuti identici)
-        self.rsi_oversold = 30
+        self.rsi_oversold = 35
         self.rsi_overbought = 70
         self.volume_threshold = 1.5
         self.min_volume = 100000
@@ -4399,15 +4399,18 @@ class IntegratedRevolutionaryTradingEngine:
 
     # In trading_engine_backtest.py, sostituisci l'INTERA funzione detect_overall_market_trend con questa:
 
+    # In trading_engine_backtest.py, sostituisci di nuovo l'INTERA funzione
+
     def detect_overall_market_trend(self, sp500_data):
         """
         Versione Backtest: Usa i dati S&P 500 pre-caricati e filtrati.
         """
-        if sp500_data is None or sp500_data.empty or len(sp500_data) < 50:
-            self.logger.warning("Dati S&P 500 insufficienti per il trend di mercato. Uso 'unknown'.")
-            return 'unknown'
-        
         try:
+            # La funzione ora accetta sp500_data come argomento, quindi non lo scarica più.
+            if sp500_data is None or sp500_data.empty or len(sp500_data) < 50:
+                self.logger.warning("Dati S&P 500 insufficienti per il trend di mercato. Uso 'unknown'.")
+                return 'unknown'
+            
             # Lavora su una copia per evitare di modificare i dati originali
             data_slice = sp500_data.copy()
             
@@ -4443,7 +4446,8 @@ class IntegratedRevolutionaryTradingEngine:
             else:
                 regime = "sideways"
             
-            self.logger.info(f"Overall Market Trend detected: {regime.replace('_', ' ').title()} (S&P500 Close: {last_close:.2f}, SMA20: {last_sma20:.2f}, SMA50: {last_sma50:.2f}, Volatility: {last_volatility:.2f})")
+            # Questa riga di log è stata rimossa nella versione precedente, la reinseriamo per chiarezza
+            self.logger.info(f"Overall Market Trend detected: {regime.replace('_', ' ').title()}")
             return regime
     
         except Exception as e:
