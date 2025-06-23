@@ -4401,23 +4401,23 @@ class IntegratedRevolutionaryTradingEngine:
 
     # In trading_engine_backtest.py, sostituisci di nuovo l'INTERA funzione
 
+    # QUESTA È L'UNICA VERSIONE DI detect_overall_market_trend CHE DEVE ESISTERE
+    # NEL FILE trading_engine_backtest.py
+    
     def detect_overall_market_trend(self, sp500_data):
         """
         Versione Backtest: Usa i dati S&P 500 pre-caricati e filtrati.
         """
         try:
-            # La funzione ora accetta sp500_data come argomento, quindi non lo scarica più.
             if sp500_data is None or sp500_data.empty or len(sp500_data) < 50:
                 self.logger.warning("Dati S&P 500 insufficienti per il trend di mercato. Uso 'unknown'.")
                 return 'unknown'
             
-            # Lavora su una copia per evitare di modificare i dati originali
             data_slice = sp500_data.copy()
             
             if 'Close' not in data_slice.columns and 'Adj Close' in data_slice.columns:
                 data_slice['Close'] = data_slice['Adj Close']
             
-            # Calcola gli indicatori sulla fetta di dati fornita
             data_slice['SMA_20'] = data_slice['Close'].rolling(window=20, min_periods=10).mean()
             data_slice['SMA_50'] = data_slice['Close'].rolling(window=50, min_periods=20).mean()
             data_slice['Returns'] = data_slice['Close'].pct_change()
@@ -4434,7 +4434,7 @@ class IntegratedRevolutionaryTradingEngine:
             is_volatile = last_volatility >= 0.20
             is_low_vol = last_volatility < 0.15
     
-            regime = 'unknown' # Default
+            regime = 'unknown'
             if last_close > last_sma20 and last_sma20 > last_sma50:
                 regime = "strong_bull" if is_low_vol else "volatile_bull"
             elif last_close < last_sma20 and last_sma20 < last_sma50:
@@ -4446,7 +4446,6 @@ class IntegratedRevolutionaryTradingEngine:
             else:
                 regime = "sideways"
             
-            # Questa riga di log è stata rimossa nella versione precedente, la reinseriamo per chiarezza
             self.logger.info(f"Overall Market Trend detected: {regime.replace('_', ' ').title()}")
             return regime
     
@@ -5802,102 +5801,7 @@ class IntegratedRevolutionaryTradingEngine:
             self.logger.error(f"Market regime detection error: {e}")
             return 'unknown'
         
-    def detect_overall_market_trend(self):
-        """
-        Determina il regime di mercato complessivo basato sull'indice S&P 500.
-        Restituisce 'strong_bull', 'volatile_bull', 'sideways', 'early_recovery',
-        'early_decline', 'volatile_bear', 'strong_bear', o 'unknown'.
-        """
-        # Questa funzione necessita della disponibilità di yfinance.
-        # Se YFINANCE_AVAILABLE è False, utilizzeremo il regime precedentemente salvato.
-        if not YFINANCE_AVAILABLE:
-            self.logger.warning("⚠️ yfinance not available for overall market trend detection. Using last known regime.")
-            # Se la variabile self.last_overall_trend non è ancora stata inizializzata dal salvataggio
-            # (es. alla prima esecuzione senza file di stato), la imposta a 'unknown'.
-            return getattr(self, 'last_overall_trend', 'unknown')
-        
-        try:
-            # Scarica dati S&P 500 per gli ultimi 4 mesi
-            # Periodo di 4 mesi (circa 80 giorni lavorativi per SMA 50 e 200)
-            sp500_data = yf.download('^GSPC', period='4mo', interval='1d', progress=False, timeout=10)
-            
-            if sp500_data.empty or len(sp500_data) < 50: # Almeno 50 giorni per calcoli affidabili
-                self.logger.warning("Insufficient S&P 500 data for overall market trend detection. Using last known regime.")
-                return getattr(self, 'last_overall_trend', 'unknown')
-
-            # Assicurati che la colonna di chiusura sia "Close"
-            if 'Close' not in sp500_data.columns:
-                if 'Adj Close' in sp500_data.columns:
-                    sp500_data['Close'] = sp500_data['Adj Close']
-                else:
-                    self.logger.warning("No 'Close' or 'Adj Close' column in S&P 500 data. Using last known regime.")
-                    return getattr(self, 'last_overall_trend', 'unknown')
-
-            # Calcola medie mobili
-            sp500_data['SMA_20'] = sp500_data['Close'].rolling(window=20, min_periods=10).mean()
-            sp500_data['SMA_50'] = sp500_data['Close'].rolling(window=50, min_periods=20).mean()
-
-            # Calcola la volatilità (rendimenti giornalieri)
-            sp500_data['Returns'] = sp500_data['Close'].pct_change()
-            # Volatilità annualizzata su 20 giorni (252 giorni lavorativi in un anno)
-            sp500_data['Volatility'] = sp500_data['Returns'].rolling(window=20).std() * (252**0.5)
-
-            # Prendi i valori più recenti
-            last_close = self.ensure_scalar(sp500_data['Close'].iloc[-1])
-            last_sma20 = self.ensure_scalar(sp500_data['SMA_20'].iloc[-1])
-            last_sma50 = self.ensure_scalar(sp500_data['SMA_50'].iloc[-1])
-            last_volatility = self.ensure_scalar(sp500_data['Volatility'].iloc[-1])
-            
-            # Recupera il prezzo di chiusura di 20 giorni fa per il cambio percentuale
-            if len(sp500_data) >= 21:
-                price_20_days_ago = self.ensure_scalar(sp500_data['Close'].iloc[-21])
-                change_20d = (last_close / price_20_days_ago - 1) * 100 if self.is_valid_indicator(price_20_days_ago) and price_20_days_ago > 0 else 0
-            else:
-                change_20d = 0 # Non abbastanza dati per calcolare il cambio a 20 giorni
-
-            # Controlla la validità dei dati cruciali
-            if not all(self.is_valid_indicator(v) for v in [last_close, last_sma20, last_sma50, last_volatility]):
-                self.logger.warning("Invalid S&P 500 indicator values for overall market trend detection. Using last known regime.")
-                return getattr(self, 'last_overall_trend', 'unknown')
-
-            # Logica di rilevamento del regime (simile a quella per i singoli ticker, ma applicata all'indice)
-            is_volatile = last_volatility >= 0.20 # Volatilità alta (20% annualizzato)
-            is_low_vol = last_volatility < 0.15 # Volatilità bassa (15% annualizzato)
-
-            if last_close > last_sma20 and last_sma20 > last_sma50:
-                # Prezzo sopra SMA20, SMA20 sopra SMA50: Trend rialzista
-                if is_low_vol:
-                    regime = "strong_bull"
-                elif is_volatile:
-                    regime = "volatile_bull"
-                else:
-                    regime = "volatile_bull" # Default a volatile se non è nè low nè high (i.e. 'normal' vol)
-            elif last_close < last_sma20 and last_sma20 < last_sma50:
-                # Prezzo sotto SMA20, SMA20 sotto SMA50: Trend ribassista
-                if is_low_vol:
-                    regime = "strong_bear"
-                elif is_volatile:
-                    regime = "volatile_bear"
-                else:
-                    regime = "volatile_bear" # Default a volatile
-            elif last_sma20 < last_sma50 and last_close > last_sma20:
-                # SMA20 sotto SMA50 ma prezzo ha rotto sopra SMA20: Potenziale inversione al rialzo
-                regime = "early_recovery"
-            elif last_sma20 > last_sma50 and last_close < last_sma20:
-                # SMA20 sopra SMA50 ma prezzo ha rotto sotto SMA20: Potenziale inversione al ribasso
-                regime = "early_decline"
-            else:
-                # Medie mobili ravvicinate, prezzo tra le medie: Mercato laterale
-                regime = "sideways"
-
-            self.logger.info(f"Overall Market Trend detected: {regime.replace('_', ' ').title()} (S&P500 Close: {last_close:.2f}, SMA20: {last_sma20:.2f}, SMA50: {last_sma50:.2f}, Volatility: {last_volatility:.2f})")
-            return regime
-
-        except Exception as e:
-            self.logger.error(f"Error detecting overall market trend (S&P 500): {e}")
-            self.logger.error(traceback.format_exc()) # Stampa traceback completo per debugging
-            # Fallback a 'unknown' in caso di errore critico (es. API yfinance non risponde)
-            return 'unknown'
+    
         
     def generate_sell_signals(self, analysis_data, is_backtest=False):
         """
