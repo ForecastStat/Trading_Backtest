@@ -217,6 +217,7 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
                     # Esegui acquisto
                     capital -= trade_value
                     
+                    # CORREZIONE: Aggiungi tutte le informazioni necessarie per il trading engine
                     new_position = {
                         'ticker': ticker,
                         'entry_price': entry_price,
@@ -224,7 +225,12 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
                         'trade_value': trade_value,
                         'entry_date': current_date,
                         'stop_loss': buy_signal.get('stop_loss'),
-                        'take_profit': buy_signal.get('take_profit')
+                        'take_profit': buy_signal.get('take_profit'),
+                        # Aggiungi informazioni aggiuntive che il trading engine potrebbe cercare
+                        'entry_p': entry_price,  # Alias per compatibilità
+                        'entry_d': current_date,  # Alias per compatibilità
+                        'entry_date_str': current_date.strftime('%Y-%m-%d'),
+                        'position_id': f"{ticker}_{current_date.strftime('%Y%m%d')}_{int(entry_price*100)}"
                     }
                     
                     open_positions.append(new_position)
@@ -326,16 +332,22 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
             engine.trade_history = closed_trades.copy()
             
             # Esegue la sessione di trading per generare i segnali
-            success = engine.run_integrated_trading_session_for_backtest(
-                analysis_data_path=str(ANALYSIS_FILE_PATH),
-                sp500_data_full=sp500_data,
-                current_backtest_date=current_date
-            )
+            try:
+                success = engine.run_integrated_trading_session_for_backtest(
+                    analysis_data_path=str(ANALYSIS_FILE_PATH),
+                    sp500_data_full=sp500_data,
+                    current_backtest_date=current_date
+                )
             
-            if success:
-                print("    ✅ Segnali generati con successo")
-            else:
-                print("    ⚠️ Generazione segnali completata con avvisi")
+                if success:
+                    print("    ✅ Segnali generati con successo")
+                else:
+                    print("    ⚠️ Generazione segnali completata con avvisi")
+                    
+            except Exception as e:
+                print(f"    ⚠️ Errore nella generazione segnali (continuando backtest): {str(e)[:100]}...")
+                # Continua il backtest anche se ci sono errori nella generazione segnali
+                # Questo evita che il backtest si fermi per errori non critici
                 
         except Exception as e:
             print(f"    ❌ ERRORE nella generazione segnali: {e}")
