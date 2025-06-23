@@ -16,6 +16,7 @@ import json
 import sqlite3
 import shutil
 import warnings
+import time
 
 warnings.filterwarnings('ignore')
 
@@ -63,6 +64,7 @@ def pre_fetch_all_historical_data(tickers):
     tickers_to_fetch = tickers + ['^GSPC']
     for i, ticker in enumerate(tickers_to_fetch):
         try:
+            time.sleep(0.1) 
             print(f"  Scaricando {ticker} ({i+1}/{len(tickers_to_fetch)})...")
             data = yf.download(ticker, start=fetch_start_date, end=fetch_end_date, progress=False, timeout=10)
             if not data.empty:
@@ -84,60 +86,73 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
         current_date_str = current_date.strftime('%Y-%m-%d')
         print(f"\n{'='*20} SIMULAZIONE GIORNO: {current_date_str} {'='*20}")
         
-        # --- BLOCCO DI ESECUZIONE (INIZIO GIORNATA) ---
-        if EXECUTION_SIGNALS_FILE.exists():
-            print(f"  - 3.0: Esecuzione ordini preparati il giorno prima...")
-            with open(EXECUTION_SIGNALS_FILE, 'r') as f:
-                signals = json.load(f).get('signals', {})
-            
-            buy_signals = signals.get('buys', [])
-            sell_signals = signals.get('sells', [])
-
-            if sell_signals:
-                positions_to_remove = []
-                for sell in sell_signals:
-                    pos_to_close = next((p for p in open_positions if p['ticker'] == sell['ticker']), None)
-                    if pos_to_close:
-                        try:
-                            exit_price = all_historical_data[sell['ticker']].loc[current_date_str]['Open']
-                            exit_value = exit_price * pos_to_close['quantity']
-                            capital += exit_value
-                            print(f"    -> VENDITA: {pos_to_close['quantity']} di {sell['ticker']} @ ${exit_price:.2f}. Capitale: ${capital:,.2f}")
-                            closed_trades_for_csv.append({'entry_price': pos_to_close['entry_price'], 'exit_price': exit_price, 'quantity': pos_to_close['quantity']})
-                            positions_to_remove.append(pos_to_close)
-                        except KeyError:
-                            print(f"    ATTENZIONE: Nessun dato per {sell['ticker']} il {current_date_str}. Vendita non eseguita.")
-                open_positions = [p for p in open_positions if p not in positions_to_remove]
-            
-            if buy_signals:
-                for buy in buy_signals:
-                    try:
-                        entry_price = all_historical_data[buy['ticker']].loc[current_date_str]['Open']
-                        trade_value = entry_price * buy['quantity_estimated']
-                        if capital >= trade_value:
-                            capital -= trade_value
-                            open_positions.append({'ticker': buy['ticker'], 'entry_price': entry_price, 'quantity': buy['quantity_estimated'], 'trade_value': trade_value, 'entry_date': current_date})
-                            print(f"    -> ACQUISTO: {buy['quantity_estimated']} di {buy['ticker']} @ ${entry_price:.2f}. Capitale: ${capital:,.2f}")
-                        else:
-                            print(f"    ACQUISTO SALTATO: {buy['ticker']} - Capitale insufficiente.")
-                    except KeyError:
-                        print(f"    ATTENZIONE: Nessun dato per {buy['ticker']} il {current_date_str}. Acquisto non eseguito.")
-            
-            os.remove(EXECUTION_SIGNALS_FILE)
+        # ==============================================================================
+        # --- CORREZIONE CHIAVE: ESECUZIONE ORDINI ALL'INIZIO DELLA GIORNATA ---
+        # Questo blocco legge gli ordini preparati il giorno prima e li esegue
+        # ai prezzi di apertura di OGGI.
+        # ==============================================================================
         
-        # Stampa lo stato del portafoglio DOPO l'esecuzione degli ordini
+        # 3.0: Controlla ed esegui gli ordini del giorno precedente
+        if EXECUTION_SIGNALS_FILE.exists():
+            print(f"  - 3.0: Trovato file di segnali. Esecuzione ordini per il {current_date_str}...")
+            try:
+                with open(EXECUTION_SIGNALS_FILE, 'r') as f:
+                    signals = json.load(f).get('signals', {})
+                
+                buy_signals = signals.get('buys', [])
+                sell_signals = signals.get('sells', [])
+
+                # Processa VENDITE prima per liberare capitale
+                if sell_signals:
+                    positions_to_remove = []
+                    for sell in sell_signals:
+                        ticker_to_sell = sell['ticker']
+                        pos_to_close = next((p for p in open_positions if p['ticker'] == ticker_to_sell), None)
+                        if pos_to_close:
+                            try:
+                                exit_price = all_historical_data[ticker_to_sell].loc[current_date_str]['Open']
+                                exit_value = exit_price * pos_to_close['quantity']
+                                capital += exit_value
+                                print(f"    -> VENDITA ESEGUITA: {pos_to_close['quantity']} di {ticker_to_sell} @ ${exit_price:.2f}. Capitale: ${capital:,.2f}")
+                                closed_trades_for_csv.append({'entry_price': pos_to_close['entry_price'], 'exit_price': exit_price, 'quantity': pos_to_close['quantity']})
+                                positions_to_remove.append(pos_to_close)
+                            except KeyError:
+                                print(f"    ATTENZIONE: Nessun dato di apertura per {ticker_to_sell} il {current_date_str}. Vendita non eseguita.")
+                    open_positions = [p for p in open_positions if p not in positions_to_remove]
+                
+                # Processa ACQUISTI dopo, con il capitale aggiornato
+                if buy_signals:
+                    for buy in buy_signals:
+                        try:
+                            entry_price = all_historical_data[buy['ticker']].loc[current_date_str]['Open']
+                            trade_value = entry_price * buy['quantity_estimated']
+                            if capital >= trade_value:
+                                capital -= trade_value
+                                open_positions.append({'ticker': buy['ticker'], 'entry_price': entry_price, 'quantity': buy['quantity_estimated'], 'trade_value': trade_value, 'entry_date': current_date})
+                                print(f"    -> ACQUISTO ESEGUITO: {buy['quantity_estimated']} di {buy['ticker']} @ ${entry_price:.2f}. Capitale: ${capital:,.2f}")
+                            else:
+                                print(f"    ACQUISTO SALTATO: {buy['ticker']} - Capitale insufficiente (${trade_value:,.2f} > ${capital:,.2f}).")
+                        except KeyError:
+                            print(f"    ATTENZIONE: Nessun dato di apertura per {buy['ticker']} il {current_date_str}. Acquisto non eseguito.")
+                
+                # Pulisce il file dei segnali dopo l'esecuzione
+                os.remove(EXECUTION_SIGNALS_FILE)
+            except (json.JSONDecodeError, FileNotFoundError):
+                 print("    ATTENZIONE: File dei segnali non trovato o corrotto. Si procede senza eseguire ordini.")
+        
+        # Stampa lo stato del portafoglio DOPO l'eventuale esecuzione degli ordini
         print(f"Stato post-esecuzione: Capitale ${capital:,.2f}, Posizioni Aperte: {len(open_positions)}")
         if open_positions:
             pos_summary = ", ".join([f"{p['ticker']}({p['quantity']})" for p in open_positions])
             print(f"  Dettaglio posizioni: {pos_summary}")
 
-        # --- BLOCCO DI ANALISI (FINE GIORNATA) ---
+        # --- BLOCCO DI ANALISI (PER GENERARE ORDINI PER DOMANI) ---
         print("  - 3.1: Esecuzione Stock Analyzer (offline)...")
         run_analysis_for_date(tickers_to_analyze, all_historical_data, current_date, ANALYSIS_FILE_PATH)
 
         print("  - 3.2: Esecuzione Trading Engine per generare ordini per DOMANI...")
         engine = IntegratedRevolutionaryTradingEngine(capital, open_positions, AI_DB_FILE)
-        engine.trade_history = closed_trades_for_csv # Passa i trade chiusi per l'apprendimento AI
+        engine.trade_history = closed_trades_for_csv
         engine.run_integrated_trading_session_for_backtest(ANALYSIS_FILE_PATH, sp500_data, current_date)
 
     print("\n--- SIMULAZIONE COMPLETATA ---")
