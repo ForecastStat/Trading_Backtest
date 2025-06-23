@@ -1,5 +1,16 @@
 # backtest_orchestrator.py
 
+# backtest_orchestrator.py
+
+# ==============================================================================
+# --- PATCH DI COMPATIBILITÀ PER NUMPY 2.0 ---
+# Questo blocco risolve l'errore 'cannot import name 'NaN' from 'numpy''.
+# Deve essere eseguito PRIMA di qualsiasi altra importazione che usa numpy (come pandas).
+import numpy as np
+if not hasattr(np, 'NaN'):
+    np.NaN = np.nan
+# ==============================================================================
+
 import os
 import pandas as pd
 import numpy as np
