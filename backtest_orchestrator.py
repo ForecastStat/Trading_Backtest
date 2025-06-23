@@ -37,13 +37,15 @@ INITIAL_CAPITAL = 100000.0
 
 BASE_DIR = Path.cwd()
 DATA_DIR = BASE_DIR / "data_backtest"
+SIGNALS_DIR = BASE_DIR / "data"  # Directory dove il trading engine salva i segnali
+
 AI_LEARNING_DIR = DATA_DIR / "ai_learning"
 REPORTS_DIR = DATA_DIR / "reports"
 SIGNALS_HISTORY_DIR = DATA_DIR / "signals_history"
 AI_DB_FILE = AI_LEARNING_DIR / "performance.db"
 ANALYSIS_FILE_PATH = DATA_DIR / "latest_analysis.json"
-EXECUTION_SIGNALS_FILE = DATA_DIR / "execution_signals.json"
-HISTORICAL_EXECUTION_SIGNALS_FILE = DATA_DIR / "historical_execution_signals.json"
+EXECUTION_SIGNALS_FILE = SIGNALS_DIR / "execution_signals.json"
+HISTORICAL_EXECUTION_SIGNALS_FILE = SIGNALS_DIR / "historical_execution_signals.json"
 
 def setup_backtest_environment():
     """FASE 1: Setup dell'ambiente di backtest"""
@@ -53,7 +55,7 @@ def setup_backtest_environment():
         print("  - Rimossa directory backtest esistente")
     
     # Crea tutte le directory necessarie
-    for directory in [DATA_DIR, AI_LEARNING_DIR, REPORTS_DIR, SIGNALS_HISTORY_DIR]:
+    for directory in [DATA_DIR, AI_LEARNING_DIR, REPORTS_DIR, SIGNALS_HISTORY_DIR, SIGNALS_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
         print(f"  - Creata directory: {directory}")
     
