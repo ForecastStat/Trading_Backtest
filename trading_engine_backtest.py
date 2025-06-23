@@ -2538,12 +2538,12 @@ class IntegratedRevolutionaryTradingEngine:
         self.take_profit_percentage = 15.0
         self.position_size_base = 0.05
         self.risk_per_trade_percent = 5.0
-        self.min_roi_threshold = 7.0
+        self.min_roi_threshold = 6.0
         
         # Parametri tecnici (mantenuti identici)
-        self.rsi_oversold = 35
+        self.rsi_oversold = 40
         self.rsi_overbought = 70
-        self.volume_threshold = 1.5
+        self.volume_threshold = 1.2
         self.min_volume = 100000
         self.min_price = 1.0
         self.max_price = 500.0
@@ -2551,11 +2551,11 @@ class IntegratedRevolutionaryTradingEngine:
         self.macd_sell_threshold = -0.1
         
         # Parametri avanzati (dal sistema esistente)
-        self.entropy_threshold = 0.75
-        self.determinism_threshold = 0.15
-        self.min_signal_quality = 1.0
-        self.trend_strength_threshold = 0.3
-        self.noise_threshold = 0.7
+        self.entropy_threshold = 0.85
+        self.determinism_threshold = 0.10
+        self.min_signal_quality = 0.8
+        self.trend_strength_threshold = 0.2
+        self.noise_threshold = 0.8
         self.correlation_threshold = 0.3
         
         # Parametri genetici (dal sistema esistente)
