@@ -3,13 +3,7 @@
 name: Backtest Trading System (2015)
 
 # --- QUANDO ESEGUIRE IL WORKFLOW ---
-on:
-  # 1. Esegui automaticamente quando fai un push sul branch 'main'
-  push:
-    branches: [ main ]
-    
-  # 2. Permette di avviare il workflow manualmente dalla pagina "Actions" di GitHub
-  workflow_dispatch:
+on: [workflow_dispatch]
 
 # --- I COMPITI DA SVOLGERE ---
 jobs:
