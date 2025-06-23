@@ -4397,29 +4397,33 @@ class IntegratedRevolutionaryTradingEngine:
         
     # In trading_engine_backtest.py, sostituisci detect_overall_market_trend
 
+    # In trading_engine_backtest.py, sostituisci l'INTERA funzione detect_overall_market_trend con questa:
+
     def detect_overall_market_trend(self, sp500_data):
         """
-        Versione Backtest: Usa i dati S&P 500 pre-caricati.
+        Versione Backtest: Usa i dati S&P 500 pre-caricati e filtrati.
         """
         if sp500_data is None or sp500_data.empty or len(sp500_data) < 50:
             self.logger.warning("Dati S&P 500 insufficienti per il trend di mercato. Uso 'unknown'.")
             return 'unknown'
         
         try:
-            # La logica interna rimane la stessa, ma opera sui dati passati come argomento
-            sp500_data = sp500_data.copy() # Lavora su una copia per sicurezza
-            if 'Close' not in sp500_data.columns and 'Adj Close' in sp500_data.columns:
-                sp500_data['Close'] = sp500_data['Adj Close']
+            # Lavora su una copia per evitare di modificare i dati originali
+            data_slice = sp500_data.copy()
             
-            sp500_data['SMA_20'] = sp500_data['Close'].rolling(window=20, min_periods=10).mean()
-            sp500_data['SMA_50'] = sp500_data['Close'].rolling(window=50, min_periods=20).mean()
-            sp500_data['Returns'] = sp500_data['Close'].pct_change()
-            sp500_data['Volatility'] = sp500_data['Returns'].rolling(window=20).std() * (252**0.5)
+            if 'Close' not in data_slice.columns and 'Adj Close' in data_slice.columns:
+                data_slice['Close'] = data_slice['Adj Close']
+            
+            # Calcola gli indicatori sulla fetta di dati fornita
+            data_slice['SMA_20'] = data_slice['Close'].rolling(window=20, min_periods=10).mean()
+            data_slice['SMA_50'] = data_slice['Close'].rolling(window=50, min_periods=20).mean()
+            data_slice['Returns'] = data_slice['Close'].pct_change()
+            data_slice['Volatility'] = data_slice['Returns'].rolling(window=20).std() * (252**0.5)
     
-            last_close = self.ensure_scalar(sp500_data['Close'].iloc[-1])
-            last_sma20 = self.ensure_scalar(sp500_data['SMA_20'].iloc[-1])
-            last_sma50 = self.ensure_scalar(sp500_data['SMA_50'].iloc[-1])
-            last_volatility = self.ensure_scalar(sp500_data['Volatility'].iloc[-1])
+            last_close = self.ensure_scalar(data_slice['Close'].iloc[-1])
+            last_sma20 = self.ensure_scalar(data_slice['SMA_20'].iloc[-1])
+            last_sma50 = self.ensure_scalar(data_slice['SMA_50'].iloc[-1])
+            last_volatility = self.ensure_scalar(data_slice['Volatility'].iloc[-1])
     
             if not all(self.is_valid_indicator(v) for v in [last_close, last_sma20, last_sma50, last_volatility]):
                 return 'unknown'
@@ -4427,6 +4431,7 @@ class IntegratedRevolutionaryTradingEngine:
             is_volatile = last_volatility >= 0.20
             is_low_vol = last_volatility < 0.15
     
+            regime = 'unknown' # Default
             if last_close > last_sma20 and last_sma20 > last_sma50:
                 regime = "strong_bull" if is_low_vol else "volatile_bull"
             elif last_close < last_sma20 and last_sma20 < last_sma50:
@@ -4437,7 +4442,8 @@ class IntegratedRevolutionaryTradingEngine:
                 regime = "early_decline"
             else:
                 regime = "sideways"
-    
+            
+            self.logger.info(f"Overall Market Trend detected: {regime.replace('_', ' ').title()} (S&P500 Close: {last_close:.2f}, SMA20: {last_sma20:.2f}, SMA50: {last_sma50:.2f}, Volatility: {last_volatility:.2f})")
             return regime
     
         except Exception as e:
