@@ -365,6 +365,7 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
             
             # Passa la cronologia dei trade all'engine per l'apprendimento AI
             engine.trade_history = closed_trades.copy()
+            engine._register_historical_trades_in_ai()
             
             # Debug logging
             print(f"    📊 Trading engine configurato: Capital=${capital:,.2f}, Posizioni={len(engine_positions)}")
