@@ -24,7 +24,7 @@ warnings.filterwarnings('ignore')
 try:
     from best_buy_backtest import run_one_time_screening_for_backtest
     from stock_analyzer_backtest import run_analysis_for_date
-    from trading_engine_backtest import IntegratedRevolutionaryTradingEngine  # CORREZIONE: Nome corretto
+    from trading_engine_backtest import IntegratedRevolutionaryTradingEngine
 except ImportError as e:
     print(f"ERRORE CRITICO: Assicurati che i file 'best_buy_backtest.py', 'stock_analyzer_backtest.py', e 'trading_engine_backtest.py' esistano e siano nella stessa cartella.")
     print(f"Dettaglio errore: {e}")
@@ -112,6 +112,29 @@ def pre_fetch_all_historical_data(tickers):
     print(f"\n✅ Download completato: {successful_downloads}/{len(tickers_to_fetch)} titoli scaricati con successo.")
     return all_data
 
+def convert_positions_for_trading_engine(orchestrator_positions, current_date):
+    """Converte le posizioni dell'orchestratore nel formato atteso dal trading engine"""
+    engine_positions = []
+    
+    for pos in orchestrator_positions:
+        # Converte nel formato che il trading engine si aspetta per generate_sell_signals
+        engine_position = {
+            'ticker': pos['ticker'],
+            'entry': pos['entry_price'],
+            'date': pos['entry_date'].isoformat(),  # Trading engine si aspetta formato ISO string
+            'quantity': pos['quantity'],
+            'amount_invested': pos['trade_value'],
+            'take_profit': pos.get('take_profit'),
+            'stop_loss': pos.get('stop_loss'),
+            # Aggiungi tutti i campi che il trading engine potrebbe cercare
+            'entry_price': pos['entry_price'],
+            'entry_date': pos['entry_date'],
+            'position_id': pos.get('position_id', f"{pos['ticker']}_{current_date.strftime('%Y%m%d')}")
+        }
+        engine_positions.append(engine_position)
+    
+    return engine_positions
+
 def execute_signals_for_day(signals, all_historical_data, current_date, capital, open_positions, closed_trades):
     """Esegue i segnali di trading per il giorno corrente"""
     if not signals:
@@ -155,26 +178,32 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
                 # Aggiorna capitale
                 capital += exit_value
                 
-                # Registra trade chiuso
+                # Registra trade chiuso con TUTTI i campi necessari per l'AI
                 trade_record = {
                     'ticker': ticker,
+                    'date': matching_position['entry_date'].strftime('%Y-%m-%d'),  # Data di entrata
                     'entry_date': matching_position['entry_date'].strftime('%Y-%m-%d'),
                     'exit_date': current_date_str,
+                    'entry': matching_position['entry_price'],
                     'entry_price': matching_position['entry_price'],
                     'exit_price': exit_price,
                     'quantity': quantity,
-                    'entry_value': matching_position['trade_value'],
-                    'exit_value': exit_value,
+                    'amount_invested': matching_position['trade_value'],
                     'profit': exit_value - matching_position['trade_value'],
-                    'profit_pct': ((exit_value - matching_position['trade_value']) / matching_position['trade_value']) * 100,
+                    'profit_percentage': ((exit_value - matching_position['trade_value']) / matching_position['trade_value']) * 100,
                     'hold_days': (current_date - matching_position['entry_date']).days,
-                    'reason': sell_signal.get('reason', 'Strategy Exit')
+                    'sell_reason': sell_signal.get('reason', 'Strategy Exit'),
+                    'regime_at_buy': 'unknown',  # Potremmo salvarlo quando creiamo la posizione
+                    'method': 'Backtest_System',
+                    'ref_score_or_roi': 12.0,  # Valore di default
+                    'advanced_indicators_at_buy': {},  # Vuoto per ora
+                    'ai_evaluation_details': {}  # Vuoto per ora
                 }
                 
                 closed_trades.append(trade_record)
                 positions_to_remove.append(matching_position)
                 
-                print(f"      ✅ VENDUTO: {quantity} {ticker} @ ${exit_price:.2f} = ${exit_value:,.2f} (P/L: {trade_record['profit_pct']:+.1f}%)")
+                print(f"      ✅ VENDUTO: {quantity} {ticker} @ ${exit_price:.2f} = ${exit_value:,.2f} (P/L: {trade_record['profit_percentage']:+.1f}%)")
                 
             except Exception as e:
                 print(f"      ❌ ERRORE VENDITA {ticker}: {e}")
@@ -184,6 +213,8 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
             open_positions.remove(pos)
         
         print(f"    ✅ Vendite completate. Capitale aggiornato: ${capital:,.2f}")
+    else:
+        print("    ℹ️ Nessun segnale di vendita da processare")
     
     # PASSO 2: ESECUZIONE ACQUISTI
     buy_signals = signals.get('buys', [])
@@ -217,7 +248,7 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
                     # Esegui acquisto
                     capital -= trade_value
                     
-                    # CORREZIONE: Aggiungi tutte le informazioni necessarie per il trading engine
+                    # Crea nuova posizione con tutti i campi necessari
                     new_position = {
                         'ticker': ticker,
                         'entry_price': entry_price,
@@ -226,10 +257,6 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
                         'entry_date': current_date,
                         'stop_loss': buy_signal.get('stop_loss'),
                         'take_profit': buy_signal.get('take_profit'),
-                        # Aggiungi informazioni aggiuntive che il trading engine potrebbe cercare
-                        'entry_p': entry_price,  # Alias per compatibilità
-                        'entry_d': current_date,  # Alias per compatibilità
-                        'entry_date_str': current_date.strftime('%Y-%m-%d'),
                         'position_id': f"{ticker}_{current_date.strftime('%Y%m%d')}_{int(entry_price*100)}"
                     }
                     
@@ -243,6 +270,8 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
                 print(f"      ❌ ERRORE ACQUISTO {ticker}: {e}")
         
         print(f"    ✅ Acquisti completati. Capitale rimanente: ${capital:,.2f}")
+    else:
+        print("    ℹ️ Nessun segnale di acquisto da processare")
     
     return capital, open_positions, closed_trades
 
@@ -281,7 +310,7 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
         for pos in open_positions:
             try:
                 current_price_data = all_historical_data[pos['ticker']].loc[current_date_str]['Close']
-                # CORREZIONE: Assicurati che sia un numero singolo
+                # Assicurati che sia un numero singolo
                 if hasattr(current_price_data, 'iloc'):
                     current_price = float(current_price_data.iloc[0])
                 else:
@@ -321,24 +350,26 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
             # Genera analisi per la data corrente
             run_analysis_for_date(tickers_to_analyze, all_historical_data, current_date, ANALYSIS_FILE_PATH)
             
-            # Istanza del trading engine con stato corrente
-            # CORREZIONE: Converti le posizioni nel formato atteso dal trading engine
-            # CORREZIONE: Converti le posizioni nel formato atteso dal trading engine
-            # SOLUZIONE DEFINITIVA: Trading engine isolato per generazione segnali
-            # L'orchestratore gestisce autonomamente le posizioni, il trading engine
-            # si occupa solo di generare segnali di acquisto senza interferenze
-            print(f"    🔧 Inizializzazione trading engine isolato (posizioni gestite dall'orchestratore)")
-            print(f"    📊 Posizioni attive nell'orchestratore: {len(open_positions)}")
+            # CORREZIONE CRUCIALE: Passa le posizioni aperte al trading engine
+            # Converti le posizioni nel formato che il trading engine si aspetta
+            engine_positions = convert_positions_for_trading_engine(open_positions, current_date)
             
-            # Istanza del trading engine SENZA posizioni per evitare conflitti
+            print(f"    🔧 Inizializzazione trading engine con {len(engine_positions)} posizioni aperte")
+            
+            # Istanza del trading engine con le posizioni aperte correnti
             engine = IntegratedRevolutionaryTradingEngine(
                 capital=capital,
-                open_positions=[],  # LISTA VUOTA: l'orchestratore gestisce tutto
+                open_positions=engine_positions,  # PASSA LE POSIZIONI APERTE
                 performance_db_path=str(AI_DB_FILE)
             )
             
             # Passa la cronologia dei trade all'engine per l'apprendimento AI
             engine.trade_history = closed_trades.copy()
+            
+            # Debug logging
+            print(f"    📊 Trading engine configurato: Capital=${capital:,.2f}, Posizioni={len(engine_positions)}")
+            if engine_positions:
+                print(f"    📋 Posizioni da valutare per vendita: {[pos['ticker'] for pos in engine_positions]}")
             
             # Esegue la sessione di trading per generare i segnali
             try:
@@ -350,13 +381,27 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
             
                 if success:
                     print("    ✅ Segnali generati con successo")
+                    
+                    # Verifica se sono stati generati segnali di vendita
+                    if EXECUTION_SIGNALS_FILE.exists():
+                        try:
+                            with open(EXECUTION_SIGNALS_FILE, 'r') as f:
+                                generated_signals = json.load(f)
+                            sell_count = len(generated_signals.get('signals', {}).get('sells', []))
+                            buy_count = len(generated_signals.get('signals', {}).get('buys', []))
+                            print(f"    📊 Segnali generati: {buy_count} acquisti, {sell_count} vendite")
+                        except:
+                            print("    ℹ️ Impossibile leggere dettagli segnali generati")
+                    
                 else:
                     print("    ⚠️ Generazione segnali completata con avvisi")
                     
             except Exception as e:
-                print(f"    ⚠️ Errore nella generazione segnali (continuando backtest): {str(e)[:100]}...")
+                print(f"    ⚠️ Errore nella generazione segnali: {str(e)[:100]}...")
                 # Continua il backtest anche se ci sono errori nella generazione segnali
-                # Questo evita che il backtest si fermi per errori non critici
+                import traceback
+                print("    🔍 Stack trace dell'errore:")
+                traceback.print_exc()
                 
         except Exception as e:
             print(f"    ❌ ERRORE nella generazione segnali: {e}")
@@ -366,10 +411,16 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
         # LOG FINALE DEL GIORNO
         print(f"  📊 Fine giornata: Capitale=${capital:,.2f}, Posizioni Aperte={len(open_positions)}, Trade Chiusi Totali={len(closed_trades)}")
         
+        # Debug per verificare che i trade chiusi vengano registrati
+        if len(closed_trades) > 0:
+            last_trade = closed_trades[-1]
+            print(f"  🔍 Ultimo trade chiuso: {last_trade['ticker']} P/L={last_trade['profit_percentage']:+.1f}%")
+        
         # Progress update ogni 50 giorni
         if day_num % 50 == 0:
             progress_pct = (day_num / len(date_range)) * 100
             print(f"\n🚀 PROGRESSO BACKTEST: {progress_pct:.1f}% completato ({day_num}/{len(date_range)} giorni)")
+            print(f"   📊 Trade chiusi finora: {len(closed_trades)}")
     
     # CALCOLO VALORE FINALE
     print(f"\n{'='*80}")
@@ -384,7 +435,6 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
         for pos in open_positions:
             try:
                 last_price_data = all_historical_data[pos['ticker']]['Close'].iloc[-1]
-                # CORREZIONE: Assicurati che sia un numero singolo
                 last_price = float(last_price_data)
                 position_value = pos['quantity'] * last_price
                 final_portfolio_value += position_value
@@ -448,6 +498,20 @@ def save_backtest_results(closed_trades, final_value):
         print(f"  📊 Win Rate: {win_rate:.1f}% ({len(profitable_trades)}/{len(closed_trades)})")
         print(f"  💵 Profitto Medio per Trade: ${avg_profit:,.2f}")
         print(f"  ⏱️ Giorni di Holding Medi: {avg_hold_days:.1f}")
+        
+        # Verifica se il database AI è stato popolato
+        try:
+            with sqlite3.connect(AI_DB_FILE) as conn:
+                cursor = conn.execute('SELECT COUNT(*) FROM trades WHERE exit_date IS NOT NULL')
+                ai_trades_count = cursor.fetchone()[0]
+                print(f"  🧠 Trade nel database AI: {ai_trades_count}")
+                
+                if ai_trades_count >= 80:
+                    print("  🎉 DATABASE AI PRONTO! L'AI può ora essere attivata per trading reale.")
+                else:
+                    print(f"  ⏳ Database AI in crescita: {80 - ai_trades_count} trade ancora necessari per attivazione completa")
+        except Exception as e:
+            print(f"  ⚠️ Errore verifica database AI: {e}")
     
     print("="*80)
 
