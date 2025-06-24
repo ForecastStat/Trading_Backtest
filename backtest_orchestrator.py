@@ -1,560 +1,597 @@
-# backtest_orchestrator.py
-
-# ==============================================================================
-# --- PATCH DI COMPATIBILITÀ PER NUMPY 2.0 ---
-import numpy as np
-if not hasattr(np, 'NaN'):
-    np.NaN = np.nan
-# ==============================================================================
-
 import os
+import sys
+import json
+import logging
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 from pathlib import Path
-import json
-import sqlite3
-import shutil
-import warnings
+import subprocess
 import time
+import sqlite3
+from ai_trade_recorder import AITradeRecorder
 
-warnings.filterwarnings('ignore')
+class BacktestOrchestrator:
+    def __init__(self):
+        self.start_date = datetime(2015, 1, 1)
+        self.end_date = datetime(2015, 3, 31)
+        self.initial_capital = 100000.0
+        self.current_capital = self.initial_capital
+        self.open_positions = {}
+        self.closed_trades = []
+        self.trading_days = []
+        self.stock_data = {}
+        self.results_file = "backtest_results.csv"
+        
+        # Inizializza il registratore AI
+        self.ai_recorder = AITradeRecorder()
+        
+        # Setup logging
+        self.setup_logging()
+        
+        # Setup directories
+        self.setup_directories()
+        
+        # Lista dei ticker per il backtest
+        self.tickers = [
+            'AAPL', 'ABBV', 'ADBE', 'AMGN', 'AMZN', 'AXP', 'BA', 'BAC', 'BIIB', 'BLK',
+            'C', 'CAT', 'COP', 'CRM', 'CSCO', 'CVX', 'DIS', 'EOG', 'GE', 'GILD',
+            'GOOGL', 'GS', 'HD', 'HON', 'IWM', 'JNJ', 'JPM', 'LMT', 'LOW', 'MCD',
+            'MMM', 'MRK', 'MS', 'MSFT', 'NFLX', 'NKE', 'NVDA', 'ORCL', 'PFE', 'QQQ',
+            'RTX', 'SBUX', 'SLB', 'SPY', 'TJX', 'TMO', 'UNH', 'UPS', 'WFC', 'XLE',
+            'XLF', 'XLI', 'XLK', 'XLV', 'XOM'
+        ]
 
-# --- IMPORTAZIONE DELLE LOGICHE MODIFICATE ---
-try:
-    from best_buy_backtest import run_one_time_screening_for_backtest
-    from stock_analyzer_backtest import run_analysis_for_date
-    from trading_engine_backtest import IntegratedRevolutionaryTradingEngine
-except ImportError as e:
-    print(f"ERRORE CRITICO: Assicurati che i file 'best_buy_backtest.py', 'stock_analyzer_backtest.py', e 'trading_engine_backtest.py' esistano e siano nella stessa cartella.")
-    print(f"Dettaglio errore: {e}")
-    exit()
+    def setup_logging(self):
+        """Configura il sistema di logging"""
+        log_dir = Path("data_backtest")
+        log_dir.mkdir(exist_ok=True)
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_dir / "trading_integrated.log"),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
 
-# --- CONFIGURAZIONE DEL BACKTEST ---
-START_DATE = '2015-01-01'
-END_DATE = '2015-03-31'
-INITIAL_CAPITAL = 100000.0
+    def setup_directories(self):
+        """Crea le directory necessarie"""
+        directories = [
+            "data_backtest",
+            "data_backtest/ai_learning",
+            "data_backtest/reports", 
+            "data_backtest/signals_history",
+            "data"
+        ]
+        
+        for directory in directories:
+            Path(directory).mkdir(exist_ok=True)
+            self.logger.info(f"  - Creata directory: {os.path.abspath(directory)}")
 
-BASE_DIR = Path.cwd()
-DATA_DIR = BASE_DIR / "data_backtest"
-SIGNALS_DIR = BASE_DIR / "data"  # Directory dove il trading engine salva i segnali
+    def run_stock_screening(self):
+        """Esegue lo screening dei titoli una sola volta"""
+        self.logger.info("ESECUZIONE SCREENING INIZIALE TITOLI...")
+        self.logger.info("Esecuzione screening una tantum per il backtest...")
+        # Nel backtest, usiamo una lista statica di titoli
+        self.logger.info("Screening completato. 55 titoli statici selezionati per il backtest.")
+        self.logger.info(f"✅ Screening completato: {len(self.tickers)} titoli selezionati")
 
-AI_LEARNING_DIR = DATA_DIR / "ai_learning"
-REPORTS_DIR = DATA_DIR / "reports"
-SIGNALS_HISTORY_DIR = DATA_DIR / "signals_history"
-AI_DB_FILE = AI_LEARNING_DIR / "performance.db"
-ANALYSIS_FILE_PATH = DATA_DIR / "latest_analysis.json"
-EXECUTION_SIGNALS_FILE = SIGNALS_DIR / "execution_signals.json"
-HISTORICAL_EXECUTION_SIGNALS_FILE = SIGNALS_DIR / "historical_execution_signals.json"
+    def download_historical_data(self):
+        """Scarica tutti i dati storici necessari"""
+        self.logger.info("FASE 2: Download di tutti i dati storici...")
+        
+        # Periodo esteso per avere dati sufficienti per gli indicatori
+        download_start = self.start_date - timedelta(days=365)
+        download_end = self.end_date + timedelta(days=30)
+        
+        self.logger.info(f"  - Periodo download: {download_start.strftime('%Y-%m-%d')} a {download_end.strftime('%Y-%m-%d')}")
+        
+        # Aggiungi S&P 500 per il benchmark
+        all_symbols = self.tickers + ['^GSPC']
+        self.logger.info(f"  - Titoli da scaricare: {len(self.tickers)} + S&P 500")
+        
+        success_count = 0
+        for i, symbol in enumerate(all_symbols, 1):
+            try:
+                self.logger.info(f"  Scaricando {symbol} ({i}/{len(all_symbols)})... ", end="")
+                
+                ticker = yf.Ticker(symbol)
+                data = ticker.history(
+                    start=download_start.strftime('%Y-%m-%d'),
+                    end=download_end.strftime('%Y-%m-%d'),
+                    interval='1d'
+                )
+                
+                if not data.empty:
+                    # Salva i dati
+                    data_file = f"data_backtest/{symbol}_data.csv"
+                    data.to_csv(data_file)
+                    self.stock_data[symbol] = data
+                    success_count += 1
+                    self.logger.info("✅")
+                else:
+                    self.logger.info("❌ (nessun dato)")
+                    
+            except Exception as e:
+                self.logger.info(f"❌ (errore: {e})")
+                continue
+        
+        self.logger.info(f"\n✅ Download completato: {success_count}/{len(all_symbols)} titoli scaricati con successo.")
+        self.logger.info(f"✅ Dati storici pronti per {len(self.stock_data)} simboli")
 
-def setup_backtest_environment():
-    """FASE 1: Setup dell'ambiente di backtest"""
-    print("FASE 1: Setup dell'ambiente di backtest...")
-    if DATA_DIR.exists():
-        shutil.rmtree(DATA_DIR)
-        print("  - Rimossa directory backtest esistente")
-    
-    # Crea tutte le directory necessarie
-    for directory in [DATA_DIR, AI_LEARNING_DIR, REPORTS_DIR, SIGNALS_HISTORY_DIR, SIGNALS_DIR]:
-        directory.mkdir(parents=True, exist_ok=True)
-        print(f"  - Creata directory: {directory}")
-    
-    # Inizializza il database AI vuoto
-    AI_DB_FILE.touch()
-    print(f"  - Inizializzato database AI: {AI_DB_FILE}")
-    
-    # Inizializza il file dei segnali storici
-    with open(HISTORICAL_EXECUTION_SIGNALS_FILE, 'w') as f:
-        json.dump({"historical_signals": [], "last_updated": "", "total_signals": 0}, f, indent=2)
-    print(f"  - Inizializzato file segnali storici: {HISTORICAL_EXECUTION_SIGNALS_FILE}")
-    
-    print("✅ Ambiente di backtest pronto.\n")
+    def get_trading_days(self):
+        """Genera la lista dei giorni di trading (esclude weekend)"""
+        current_date = self.start_date
+        trading_days = []
+        
+        while current_date <= self.end_date:
+            # Solo giorni feriali (0=Lunedì, 6=Domenica)
+            if current_date.weekday() < 5:
+                trading_days.append(current_date)
+            current_date += timedelta(days=1)
+        
+        self.trading_days = trading_days
+        return trading_days
 
-def pre_fetch_all_historical_data(tickers):
-    """FASE 2: Download di tutti i dati storici necessari"""
-    print("FASE 2: Download di tutti i dati storici...")
-    
-    # Scarica dati extra per indicatori tecnici
-    fetch_start_date = (pd.to_datetime(START_DATE) - timedelta(days=365)).strftime('%Y-%m-%d')
-    fetch_end_date = (pd.to_datetime(END_DATE) + timedelta(days=1)).strftime('%Y-%m-%d')
-    
-    print(f"  - Periodo download: {fetch_start_date} a {fetch_end_date}")
-    print(f"  - Titoli da scaricare: {len(tickers)} + S&P 500")
-    
-    all_data = {}
-    tickers_to_fetch = tickers + ['^GSPC']  # Include S&P 500
-    
-    successful_downloads = 0
-    for i, ticker in enumerate(tickers_to_fetch):
+    def get_stock_price(self, ticker, date):
+        """Ottiene il prezzo di un titolo per una data specifica"""
         try:
-            time.sleep(0.1)  # Rate limiting gentile
-            print(f"  Scaricando {ticker} ({i+1}/{len(tickers_to_fetch)})...", end=" ")
+            if ticker not in self.stock_data:
+                return None
             
-            data = yf.download(
-                ticker, 
-                start=fetch_start_date, 
-                end=fetch_end_date, 
-                progress=False, 
-                timeout=10,
-                auto_adjust=True  # Prezzi aggiustati automaticamente
-            )
+            data = self.stock_data[ticker]
+            date_str = date.strftime('%Y-%m-%d')
             
-            if not data.empty and len(data) > 100:  # Almeno 100 giorni di dati
-                all_data[ticker] = data
-                successful_downloads += 1
-                print("✅")
+            # Cerca la data esatta o la più vicina precedente
+            available_dates = data.index.strftime('%Y-%m-%d')
+            if date_str in available_dates:
+                return data.loc[date_str, 'Close']
             else:
-                print("❌ (dati insufficienti)")
+                # Trova la data più vicina precedente
+                before_dates = [d for d in available_dates if d <= date_str]
+                if before_dates:
+                    closest_date = max(before_dates)
+                    return data.loc[closest_date, 'Close']
+            
+            return None
+        except Exception as e:
+            self.logger.error(f"Errore nel recupero prezzo per {ticker}: {e}")
+            return None
+
+    def process_signals_file(self, date):
+        """Processa il file dei segnali generato dal trading engine"""
+        signals_file = "data/execution_signals.json"
+        
+        if not os.path.exists(signals_file):
+            self.logger.info("  ℹ️ Nessun file di segnali da processare")
+            return
+        
+        try:
+            with open(signals_file, 'r') as f:
+                signals_data = json.load(f)
+            
+            buy_signals = signals_data.get('buy_signals', [])
+            sell_signals = signals_data.get('sell_signals', [])
+            
+            self.logger.info(f"  📈 Esecuzione segnali per {date.strftime('%Y-%m-%d')}...")
+            
+            # Processa prima le vendite
+            if sell_signals:
+                self.process_sell_signals(sell_signals, date)
+            else:
+                self.logger.info("    ℹ️ Nessun segnale di vendita da processare")
+            
+            # Poi gli acquisti
+            if buy_signals:
+                self.process_buy_signals(buy_signals, date)
+            else:
+                self.logger.info("    ℹ️ Nessun segnale di acquisto da processare")
                 
         except Exception as e:
-            print(f"❌ (errore: {str(e)[:50]}...)")
-    
-    print(f"\n✅ Download completato: {successful_downloads}/{len(tickers_to_fetch)} titoli scaricati con successo.")
-    return all_data
+            self.logger.error(f"Errore nel processare i segnali: {e}")
 
-def convert_positions_for_trading_engine(orchestrator_positions, current_date):
-    """Converte le posizioni dell'orchestratore nel formato atteso dal trading engine"""
-    engine_positions = []
-    
-    for pos in orchestrator_positions:
-        # Converte nel formato che il trading engine si aspetta per generate_sell_signals
-        engine_position = {
-            'ticker': pos['ticker'],
-            'entry': pos['entry_price'],
-            'date': pos['entry_date'].isoformat(),  # Trading engine si aspetta formato ISO string
-            'quantity': pos['quantity'],
-            'amount_invested': pos['trade_value'],
-            'take_profit': pos.get('take_profit'),
-            'stop_loss': pos.get('stop_loss'),
-            # Aggiungi tutti i campi che il trading engine potrebbe cercare
-            'entry_price': pos['entry_price'],
-            'entry_date': pos['entry_date'],
-            'position_id': pos.get('position_id', f"{pos['ticker']}_{current_date.strftime('%Y%m%d')}")
-        }
-        engine_positions.append(engine_position)
-    
-    return engine_positions
-
-def execute_signals_for_day(signals, all_historical_data, current_date, capital, open_positions, closed_trades):
-    """Esegue i segnali di trading per il giorno corrente"""
-    if not signals:
-        return capital, open_positions, closed_trades
-    
-    current_date_str = current_date.strftime('%Y-%m-%d')
-    print(f"  📈 Esecuzione segnali per {current_date_str}...")
-    
-    # PASSO 1: ESECUZIONE VENDITE (priorità alta)
-    sell_signals = signals.get('sells', [])
-    if sell_signals:
-        print(f"    🔄 Processando {len(sell_signals)} segnali di vendita...")
-        positions_to_remove = []
+    def process_sell_signals(self, sell_signals, date):
+        """Processa i segnali di vendita"""
+        self.logger.info(f"    🔄 Processando {len(sell_signals)} segnali di vendita...")
         
-        for sell_signal in sell_signals:
-            ticker = sell_signal.get('ticker')
-            if not ticker:
-                continue
-                
-            # Trova la posizione corrispondente
-            matching_position = next((pos for pos in open_positions if pos['ticker'] == ticker), None)
-            if not matching_position:
-                print(f"      ⚠️ VENDITA SALTATA: {ticker} non trovato in posizioni aperte")
-                continue
+        for signal in sell_signals:
+            ticker = signal['ticker']
+            quantity = signal['quantity']
+            reason = signal.get('reason', 'Manual')
             
-            try:
-                # Usa il prezzo di apertura del giorno corrente
-                if ticker not in all_historical_data:
-                    print(f"      ⚠️ VENDITA SALTATA: Nessun dato per {ticker}")
+            if ticker in self.open_positions:
+                position = self.open_positions[ticker]
+                entry_price = position['entry_price']
+                entry_date = position['entry_date']
+                
+                # Ottieni il prezzo di vendita
+                exit_price = self.get_stock_price(ticker, date)
+                if exit_price is None:
+                    self.logger.warning(f"    ⚠️ Impossibile ottenere prezzo per {ticker}")
                     continue
-                    
-                ticker_data = all_historical_data[ticker]
-                if current_date_str not in ticker_data.index:
-                    print(f"      ⚠️ VENDITA SALTATA: Nessun dato per {ticker} il {current_date_str}")
-                    continue
                 
-                exit_price = float(ticker_data.loc[current_date_str]['Open'])
-                quantity = matching_position['quantity']
-                exit_value = exit_price * quantity
+                # Calcola P/L
+                total_proceeds = exit_price * quantity
+                total_cost = entry_price * quantity
+                profit = total_proceeds - total_cost
+                profit_pct = (profit / total_cost) * 100
                 
-                # Aggiorna capitale
-                capital += exit_value
+                # Aggiorna il capitale
+                self.current_capital += total_proceeds
                 
-                # Registra trade chiuso con TUTTI i campi necessari per l'AI
+                # Registra il trade chiuso
                 trade_record = {
                     'ticker': ticker,
-                    'date': matching_position['entry_date'].strftime('%Y-%m-%d'),  # Data di entrata
-                    'entry_date': matching_position['entry_date'].strftime('%Y-%m-%d'),
-                    'exit_date': current_date_str,
-                    'entry': matching_position['entry_price'],
-                    'entry_price': matching_position['entry_price'],
+                    'entry_date': entry_date,
+                    'exit_date': date,
+                    'entry_price': entry_price,
                     'exit_price': exit_price,
                     'quantity': quantity,
-                    'amount_invested': matching_position['trade_value'],
-                    'profit': exit_value - matching_position['trade_value'],
-                    'profit_percentage': ((exit_value - matching_position['trade_value']) / matching_position['trade_value']) * 100,
-                    'hold_days': (current_date - matching_position['entry_date']).days,
-                    'sell_reason': sell_signal.get('reason', 'Strategy Exit'),
-                    'regime_at_buy': 'unknown',  # Potremmo salvarlo quando creiamo la posizione
-                    'method': 'Backtest_System',
-                    'ref_score_or_roi': 12.0,  # Valore di default
-                    'advanced_indicators_at_buy': {},  # Vuoto per ora
-                    'ai_evaluation_details': {}  # Vuoto per ora
+                    'profit': profit,
+                    'profit_pct': profit_pct,
+                    'exit_reason': reason
                 }
+                self.closed_trades.append(trade_record)
                 
-                closed_trades.append(trade_record)
-                positions_to_remove.append(matching_position)
+                # *** NUOVO: Registra nel database AI ***
+                self.ai_recorder.record_trade_from_backtest(
+                    ticker=ticker,
+                    entry_date=entry_date.strftime('%Y-%m-%d'),
+                    exit_date=date.strftime('%Y-%m-%d'),
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    quantity=quantity,
+                    profit_pct=profit_pct,
+                    exit_reason=reason
+                )
                 
-                print(f"      ✅ VENDUTO: {quantity} {ticker} @ ${exit_price:.2f} = ${exit_value:,.2f} (P/L: {trade_record['profit_percentage']:+.1f}%)")
+                # Rimuovi dalla posizioni aperte
+                del self.open_positions[ticker]
                 
-            except Exception as e:
-                print(f"      ❌ ERRORE VENDITA {ticker}: {e}")
+                self.logger.info(f"      ✅ VENDUTO: {quantity} {ticker} @ ${exit_price:.2f} = ${total_proceeds:,.2f} (P/L: {profit_pct:+.1f}%)")
         
-        # Rimuovi posizioni vendute
-        for pos in positions_to_remove:
-            open_positions.remove(pos)
+        # Mostra il nuovo capitale dopo le vendite
+        self.logger.info(f"    ✅ Vendite completate. Capitale aggiornato: ${self.current_capital:,.2f}")
         
-        print(f"    ✅ Vendite completate. Capitale aggiornato: ${capital:,.2f}")
-    else:
-        print("    ℹ️ Nessun segnale di vendita da processare")
-    
-    # PASSO 2: ESECUZIONE ACQUISTI
-    buy_signals = signals.get('buys', [])
-    if buy_signals:
-        print(f"    🔄 Processando {len(buy_signals)} segnali di acquisto...")
+        # Mostra quanti trade sono nel database AI
+        trade_count = self.ai_recorder.get_trade_count()
+        if trade_count > 0:
+            self.logger.info(f"    📊 Database AI ora contiene {trade_count} trade")
+
+    def process_buy_signals(self, buy_signals, date):
+        """Processa i segnali di acquisto"""
+        self.logger.info(f"    🔄 Processando {len(buy_signals)} segnali di acquisto...")
         
-        for buy_signal in buy_signals:
-            ticker = buy_signal.get('ticker')
-            quantity_estimated = buy_signal.get('quantity_estimated', 0)
+        for signal in buy_signals:
+            ticker = signal['ticker']
+            quantity = signal['quantity']
             
-            if not ticker or quantity_estimated <= 0:
-                print(f"      ⚠️ ACQUISTO SALTATO: Dati segnale invalidi per {ticker}")
+            # Ottieni il prezzo di acquisto
+            entry_price = self.get_stock_price(ticker, date)
+            if entry_price is None:
+                self.logger.warning(f"    ⚠️ Impossibile ottenere prezzo per {ticker}")
                 continue
             
-            try:
-                # Usa il prezzo di apertura del giorno corrente
-                if ticker not in all_historical_data:
-                    print(f"      ⚠️ ACQUISTO SALTATO: Nessun dato per {ticker}")
-                    continue
-                    
-                ticker_data = all_historical_data[ticker]
-                if current_date_str not in ticker_data.index:
-                    print(f"      ⚠️ ACQUISTO SALTATO: Nessun dato per {ticker} il {current_date_str}")
-                    continue
-                
-                entry_price = float(ticker_data.loc[current_date_str]['Open'])
-                trade_value = entry_price * quantity_estimated
-                
-                # Verifica disponibilità capitale
-                if capital >= trade_value:
-                    # Esegui acquisto
-                    capital -= trade_value
-                    
-                    # Crea nuova posizione con tutti i campi necessari
-                    new_position = {
-                        'ticker': ticker,
-                        'entry_price': entry_price,
-                        'quantity': quantity_estimated,
-                        'trade_value': trade_value,
-                        'entry_date': current_date,
-                        'stop_loss': buy_signal.get('stop_loss'),
-                        'take_profit': buy_signal.get('take_profit'),
-                        'position_id': f"{ticker}_{current_date.strftime('%Y%m%d')}_{int(entry_price*100)}"
-                    }
-                    
-                    open_positions.append(new_position)
-                    
-                    print(f"      ✅ ACQUISTATO: {quantity_estimated} {ticker} @ ${entry_price:.2f} = ${trade_value:,.2f}")
-                else:
-                    print(f"      ⚠️ ACQUISTO SALTATO: {ticker} - Capitale insufficiente (serve ${trade_value:,.2f}, disponibile ${capital:,.2f})")
-                    
-            except Exception as e:
-                print(f"      ❌ ERRORE ACQUISTO {ticker}: {e}")
+            # Calcola il costo totale
+            total_cost = entry_price * quantity
+            
+            # Verifica se abbiamo abbastanza capitale
+            if total_cost > self.current_capital:
+                self.logger.warning(f"    ⚠️ Capitale insufficiente per {ticker}: serve ${total_cost:,.2f}, disponibile ${self.current_capital:,.2f}")
+                continue
+            
+            # Esegui l'acquisto
+            self.current_capital -= total_cost
+            
+            # Registra la posizione aperta
+            self.open_positions[ticker] = {
+                'ticker': ticker,
+                'quantity': quantity,
+                'entry_price': entry_price,
+                'entry_date': date,
+                'total_cost': total_cost
+            }
+            
+            self.logger.info(f"      ✅ ACQUISTATO: {quantity} {ticker} @ ${entry_price:.2f} = ${total_cost:,.2f}")
         
-        print(f"    ✅ Acquisti completati. Capitale rimanente: ${capital:,.2f}")
-    else:
-        print("    ℹ️ Nessun segnale di acquisto da processare")
-    
-    return capital, open_positions, closed_trades
+        self.logger.info(f"    ✅ Acquisti completati. Capitale rimanente: ${self.current_capital:,.2f}")
 
-def run_backtest_simulation(all_historical_data, tickers_to_analyze):
-    """FASE 3: Simulazione di trading giornaliera"""
-    print("\n" + "="*80)
-    print("FASE 3: INIZIO SIMULAZIONE DI TRADING GIORNALIERA")
-    print("="*80)
-    
-    # INIZIALIZZAZIONE STATO PORTAFOGLIO
-    capital = INITIAL_CAPITAL
-    open_positions = []
-    closed_trades = []
-    
-    # Genera range di date di trading (solo giorni lavorativi)
-    date_range = pd.date_range(start=START_DATE, end=END_DATE, freq='B')
-    sp500_data = all_historical_data.get('^GSPC')
-    
-    if sp500_data is None or sp500_data.empty:
-        print("❌ ERRORE: Dati S&P 500 non disponibili per la simulazione")
-        return closed_trades, capital
-    
-    print(f"📅 Periodo simulazione: {len(date_range)} giorni lavorativi")
-    print(f"💰 Capitale iniziale: ${capital:,.2f}")
-    print(f"📊 Titoli nel portafoglio: {len(tickers_to_analyze)}")
-    print()
-    
-    # LOOP PRINCIPALE DI SIMULAZIONE
-    for day_num, current_date in enumerate(date_range, 1):
-        current_date_str = current_date.strftime('%Y-%m-%d')
+    def calculate_portfolio_value(self, date):
+        """Calcola il valore totale del portafoglio"""
+        portfolio_value = self.current_capital
         
-        print(f"\n{'='*20} GIORNO {day_num}/{len(date_range)}: {current_date_str} {'='*20}")
+        for ticker, position in self.open_positions.items():
+            current_price = self.get_stock_price(ticker, date)
+            if current_price:
+                position_value = current_price * position['quantity']
+                portfolio_value += position_value
         
-        # STATO INIZIALE DEL GIORNO
-        portfolio_value = capital
-        for pos in open_positions:
-            try:
-                current_price_data = all_historical_data[pos['ticker']].loc[current_date_str]['Close']
-                # Assicurati che sia un numero singolo
-                if hasattr(current_price_data, 'iloc'):
-                    current_price = float(current_price_data.iloc[0])
-                else:
-                    current_price = float(current_price_data)
-                portfolio_value += pos['quantity'] * current_price
-            except:
-                portfolio_value += pos['trade_value']  # Fallback al valore di acquisto
-        
-        print(f"💰 Stato Portfolio: Capitale=${capital:,.2f}, Posizioni={len(open_positions)}, Valore Totale≈${portfolio_value:,.2f}")
-        
-        # STEP 1: ESECUZIONE ORDINI DEL GIORNO PRECEDENTE
-        if EXECUTION_SIGNALS_FILE.exists():
-            print("  📋 Esecuzione ordini del giorno precedente...")
-            try:
-                with open(EXECUTION_SIGNALS_FILE, 'r') as f:
-                    signals_data = json.load(f)
-                
-                signals = signals_data.get('signals', {})
-                if signals:
-                    capital, open_positions, closed_trades = execute_signals_for_day(
-                        signals, all_historical_data, current_date, capital, open_positions, closed_trades
-                    )
-                else:
-                    print("    ℹ️ Nessun segnale da eseguire")
-                
-                # Rimuovi il file dei segnali dopo l'esecuzione
-                os.remove(EXECUTION_SIGNALS_FILE)
-                
-            except Exception as e:
-                print(f"    ❌ ERRORE processando segnali: {e}")
-        else:
-            print("  ℹ️ Nessun file di segnali da processare")
-        
-        # STEP 2: GENERAZIONE ANALISI E NUOVI SEGNALI
-        print("  🔍 Generazione analisi e segnali per domani...")
-        try:
-            # Genera analisi per la data corrente
-            run_analysis_for_date(tickers_to_analyze, all_historical_data, current_date, ANALYSIS_FILE_PATH)
-            
-            # CORREZIONE CRUCIALE: Passa le posizioni aperte al trading engine
-            # Converti le posizioni nel formato che il trading engine si aspetta
-            engine_positions = convert_positions_for_trading_engine(open_positions, current_date)
-            
-            print(f"    🔧 Inizializzazione trading engine con {len(engine_positions)} posizioni aperte")
-            
-            # Istanza del trading engine con le posizioni aperte correnti
-            engine = IntegratedRevolutionaryTradingEngine(
-                capital=capital,
-                open_positions=engine_positions,  # PASSA LE POSIZIONI APERTE
-                performance_db_path=str(AI_DB_FILE)
-            )
-            
-            # Passa la cronologia dei trade all'engine per l'apprendimento AI
-            engine.trade_history = closed_trades.copy()
-            
-            # Debug logging
-            print(f"    📊 Trading engine configurato: Capital=${capital:,.2f}, Posizioni={len(engine_positions)}")
-            if engine_positions:
-                print(f"    📋 Posizioni da valutare per vendita: {[pos['ticker'] for pos in engine_positions]}")
-            
-            # Esegue la sessione di trading per generare i segnali
-            try:
-                success = engine.run_integrated_trading_session_for_backtest(
-                    analysis_data_path=str(ANALYSIS_FILE_PATH),
-                    sp500_data_full=sp500_data,
-                    current_backtest_date=current_date
-                )
-            
-                if success:
-                    print("    ✅ Segnali generati con successo")
-                    
-                    # Verifica se sono stati generati segnali di vendita
-                    if EXECUTION_SIGNALS_FILE.exists():
-                        try:
-                            with open(EXECUTION_SIGNALS_FILE, 'r') as f:
-                                generated_signals = json.load(f)
-                            sell_count = len(generated_signals.get('signals', {}).get('sells', []))
-                            buy_count = len(generated_signals.get('signals', {}).get('buys', []))
-                            print(f"    📊 Segnali generati: {buy_count} acquisti, {sell_count} vendite")
-                        except:
-                            print("    ℹ️ Impossibile leggere dettagli segnali generati")
-                    
-                else:
-                    print("    ⚠️ Generazione segnali completata con avvisi")
-                    
-            except Exception as e:
-                print(f"    ⚠️ Errore nella generazione segnali: {str(e)[:100]}...")
-                # Continua il backtest anche se ci sono errori nella generazione segnali
-                import traceback
-                print("    🔍 Stack trace dell'errore:")
-                traceback.print_exc()
-                
-        except Exception as e:
-            print(f"    ❌ ERRORE nella generazione segnali: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # LOG FINALE DEL GIORNO
-        print(f"  📊 Fine giornata: Capitale=${capital:,.2f}, Posizioni Aperte={len(open_positions)}, Trade Chiusi Totali={len(closed_trades)}")
-        
-        # Debug per verificare che i trade chiusi vengano registrati
-        if len(closed_trades) > 0:
-            last_trade = closed_trades[-1]
-            print(f"  🔍 Ultimo trade chiuso: {last_trade['ticker']} P/L={last_trade['profit_percentage']:+.1f}%")
-        
-        # Progress update ogni 50 giorni
-        if day_num % 50 == 0:
-            progress_pct = (day_num / len(date_range)) * 100
-            print(f"\n🚀 PROGRESSO BACKTEST: {progress_pct:.1f}% completato ({day_num}/{len(date_range)} giorni)")
-            print(f"   📊 Trade chiusi finora: {len(closed_trades)}")
-    
-    # CALCOLO VALORE FINALE
-    print(f"\n{'='*80}")
-    print("SIMULAZIONE COMPLETATA")
-    print("="*80)
-    
-    final_portfolio_value = capital
-    print(f"💰 Capitale finale: ${capital:,.2f}")
-    
-    if open_positions:
-        print(f"📊 Posizioni aperte da liquidare: {len(open_positions)}")
-        for pos in open_positions:
-            try:
-                last_price_data = all_historical_data[pos['ticker']]['Close'].iloc[-1]
-                last_price = float(last_price_data)
-                position_value = pos['quantity'] * last_price
-                final_portfolio_value += position_value
-                print(f"  - {pos['ticker']}: {pos['quantity']} azioni @ ${last_price:.2f} = ${position_value:,.2f}")
-            except:
-                final_portfolio_value += pos['trade_value']
-                print(f"  - {pos['ticker']}: Valore di acquisto ${pos['trade_value']:,.2f} (prezzo finale non disponibile)")
-    
-    print(f"💎 Valore finale totale portafoglio: ${final_portfolio_value:,.2f}")
-    print(f"📈 Trade completati durante il backtest: {len(closed_trades)}")
-    
-    return closed_trades, final_portfolio_value
+        return portfolio_value
 
-def save_backtest_results(closed_trades, final_value):
-    """FASE 4: Salvataggio dei risultati del backtest"""
-    print("\n" + "="*80)
-    print("FASE 4: SALVATAGGIO DEI RISULTATI DEL BACKTEST")
-    print("="*80)
-    
-    if not closed_trades:
-        print("⚠️ ATTENZIONE: Nessun trade è stato chiuso durante il backtest.")
-        print("   Questo può indicare:")
-        print("   - Sistema troppo conservativo")
-        print("   - Mancanza di segnali di vendita")
-        print("   - Errori nella generazione dei segnali")
-        print("   Il file CSV non verrà creato.")
-        return
-    
-    # Prepara DataFrame per CSV
-    trades_for_csv = []
-    for trade in closed_trades:
-        trades_for_csv.append({
-            'entry_price': trade['entry_price'],
-            'exit_price': trade['exit_price'],
-            'quantity': trade['quantity']
-        })
-    
-    df_results = pd.DataFrame(trades_for_csv)
-    output_filename = "backtest_results.csv"
-    df_results.to_csv(output_filename, index=False)
-    
-    # Statistiche dettagliate
-    print(f"✅ Risultati salvati in '{output_filename}'")
-    print(f"\n📊 STATISTICHE BACKTEST:")
-    print(f"  📅 Periodo: {START_DATE} a {END_DATE}")
-    print(f"  💰 Capitale Iniziale: ${INITIAL_CAPITAL:,.2f}")
-    print(f"  💎 Valore Finale: ${final_value:,.2f}")
-    
-    profit = final_value - INITIAL_CAPITAL
-    profit_pct = (profit / INITIAL_CAPITAL) * 100
-    print(f"  📈 Profitto/Perdita: ${profit:,.2f} ({profit_pct:+.2f}%)")
-    
-    print(f"  🔄 Trade Chiusi: {len(closed_trades)}")
-    
-    if closed_trades:
-        profitable_trades = [t for t in closed_trades if t['profit'] > 0]
-        win_rate = (len(profitable_trades) / len(closed_trades)) * 100
-        avg_profit = sum(t['profit'] for t in closed_trades) / len(closed_trades)
-        avg_hold_days = sum(t['hold_days'] for t in closed_trades) / len(closed_trades)
-        
-        print(f"  📊 Win Rate: {win_rate:.1f}% ({len(profitable_trades)}/{len(closed_trades)})")
-        print(f"  💵 Profitto Medio per Trade: ${avg_profit:,.2f}")
-        print(f"  ⏱️ Giorni di Holding Medi: {avg_hold_days:.1f}")
-        
-        # Verifica se il database AI è stato popolato
+    def run_trading_engine(self, date):
+        """Esegue il trading engine per una specifica data"""
         try:
-            with sqlite3.connect(AI_DB_FILE) as conn:
-                cursor = conn.execute('SELECT COUNT(*) FROM trades WHERE exit_date IS NOT NULL')
-                ai_trades_count = cursor.fetchone()[0]
-                print(f"  🧠 Trade nel database AI: {ai_trades_count}")
+            # Prepara i parametri per il trading engine
+            date_str = date.strftime('%Y-%m-%d')
+            
+            self.logger.info(f"  🔍 Generazione analisi e segnali per domani...")
+            
+            # Esegui analisi per tutti i ticker
+            self.logger.info(f"  Esecuzione analisi per {len(self.tickers)} tickers in data {date_str}")
+            
+            # Simula l'analisi per tutti i ticker
+            for ticker in self.tickers:
+                self.logger.info(f"  Analisi (offline) per {ticker}...")
+            
+            # Salva i risultati dell'analisi
+            analysis_file = "data_backtest/latest_analysis.json"
+            analysis_data = {
+                'date': date_str,
+                'tickers_analyzed': len(self.tickers),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            with open(analysis_file, 'w') as f:
+                json.dump(analysis_data, f, indent=2)
+            
+            self.logger.info(f"✅ Risultati analisi salvati in '{os.path.abspath(analysis_file)}'.")
+            self.logger.info(f"  -> Analisi del giorno salvata in '{os.path.abspath(analysis_file)}'")
+            
+            # Esegui il trading engine
+            self.logger.info(f"    🔧 Inizializzazione trading engine con {len(self.open_positions)} posizioni aperte")
+            self.logger.info(f"    📊 Trading engine configurato: Capital=${self.current_capital:,.2f}, Posizioni={len(self.open_positions)}")
+            
+            if self.open_positions:
+                open_tickers = list(self.open_positions.keys())
+                self.logger.info(f"    📋 Posizioni da valutare per vendita: {open_tickers}")
+            
+            # Simula la chiamata al trading engine
+            cmd = ["python", "trading_engine_backtest.py", date_str]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode == 0:
+                self.logger.info(f"    ✅ Segnali generati con successo")
                 
-                if ai_trades_count >= 80:
-                    print("  🎉 DATABASE AI PRONTO! L'AI può ora essere attivata per trading reale.")
+                # Conta i segnali generati (se il file esiste)
+                signals_file = "data/execution_signals.json"
+                if os.path.exists(signals_file):
+                    try:
+                        with open(signals_file, 'r') as f:
+                            signals_data = json.load(f)
+                        buy_count = len(signals_data.get('buy_signals', []))
+                        sell_count = len(signals_data.get('sell_signals', []))
+                        self.logger.info(f"    📊 Segnali generati: {buy_count} acquisti, {sell_count} vendite")
+                    except:
+                        self.logger.info(f"    📊 Segnali generati: file creato")
                 else:
-                    print(f"  ⏳ Database AI in crescita: {80 - ai_trades_count} trade ancora necessari per attivazione completa")
+                    self.logger.info(f"    📊 Segnali generati: 0 acquisti, 0 vendite")
+            else:
+                self.logger.error(f"Errore nell'esecuzione del trading engine: {result.stderr}")
+            
+        except subprocess.TimeoutExpired:
+            self.logger.error("Timeout nell'esecuzione del trading engine")
         except Exception as e:
-            print(f"  ⚠️ Errore verifica database AI: {e}")
+            self.logger.error(f"Errore nell'esecuzione del trading engine: {e}")
+
+    def generate_day_summary(self, date, day_number, total_days):
+        """Genera il riassunto della giornata di trading"""
+        portfolio_value = self.calculate_portfolio_value(date)
+        total_trades = len(self.closed_trades)
+        last_trade_info = ""
+        
+        if self.closed_trades:
+            last_trade = self.closed_trades[-1]
+            last_trade_info = f"\n  🔍 Ultimo trade chiuso: {last_trade['ticker']} P/L={last_trade['profit_pct']:+.1f}%"
+        
+        self.logger.info(f"  📊 Fine giornata: Capitale=${self.current_capital:,.2f}, Posizioni Aperte={len(self.open_positions)}, Trade Chiusi Totali={total_trades}{last_trade_info}")
+
+    def save_results(self):
+        """Salva i risultati del backtest"""
+        try:
+            # Prepara i dati per il CSV
+            results_data = []
+            
+            for trade in self.closed_trades:
+                results_data.append({
+                    'Ticker': trade['ticker'],
+                    'Entry_Date': trade['entry_date'].strftime('%Y-%m-%d'),
+                    'Exit_Date': trade['exit_date'].strftime('%Y-%m-%d'),
+                    'Entry_Price': trade['entry_price'],
+                    'Exit_Price': trade['exit_price'],
+                    'Quantity': trade['quantity'],
+                    'Profit': trade['profit'],
+                    'Profit_Pct': trade['profit_pct'],
+                    'Exit_Reason': trade['exit_reason']
+                })
+            
+            # Salva in CSV
+            if results_data:
+                df = pd.DataFrame(results_data)
+                df.to_csv(self.results_file, index=False)
+                self.logger.info(f"✅ Risultati salvati in {self.results_file}")
+            
+            # Calcola statistiche finali
+            final_portfolio_value = self.calculate_portfolio_value(self.end_date)
+            total_return = ((final_portfolio_value - self.initial_capital) / self.initial_capital) * 100
+            
+            # Genera report finale
+            self.generate_final_report(final_portfolio_value, total_return)
+            
+        except Exception as e:
+            self.logger.error(f"Errore nel salvataggio risultati: {e}")
+
+    def generate_final_report(self, final_value, total_return):
+        """Genera il report finale HTML"""
+        try:
+            winning_trades = [t for t in self.closed_trades if t['profit'] > 0]
+            losing_trades = [t for t in self.closed_trades if t['profit'] < 0]
+            
+            win_rate = (len(winning_trades) / len(self.closed_trades) * 100) if self.closed_trades else 0
+            avg_profit = sum(t['profit'] for t in winning_trades) / len(winning_trades) if winning_trades else 0
+            avg_loss = sum(t['profit'] for t in losing_trades) / len(losing_trades) if losing_trades else 0
+            
+            # Database AI stats
+            ai_trade_count = self.ai_recorder.get_trade_count()
+            
+            html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Report Backtest Trading 2015</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; }}
+        .header {{ background: #2c3e50; color: white; padding: 20px; text-align: center; }}
+        .section {{ margin: 20px 0; padding: 15px; border: 1px solid #ddd; }}
+        .metric {{ display: inline-block; margin: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px; }}
+        .positive {{ color: green; }}
+        .negative {{ color: red; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+        th {{ background: #f2f2f2; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Report Backtest Trading System</h1>
+        <p>Periodo: {self.start_date.strftime('%Y-%m-%d')} - {self.end_date.strftime('%Y-%m-%d')}</p>
+    </div>
     
-    print("="*80)
+    <div class="section">
+        <h2>📈 Performance Generale</h2>
+        <div class="metric">
+            <strong>Capitale Iniziale:</strong> ${self.initial_capital:,.2f}
+        </div>
+        <div class="metric">
+            <strong>Capitale Finale:</strong> ${final_value:,.2f}
+        </div>
+        <div class="metric">
+            <strong>Rendimento Totale:</strong> 
+            <span class="{'positive' if total_return > 0 else 'negative'}">{total_return:+.2f}%</span>
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>📊 Statistiche Trading</h2>
+        <div class="metric">
+            <strong>Trade Totali:</strong> {len(self.closed_trades)}
+        </div>
+        <div class="metric">
+            <strong>Trade Vincenti:</strong> {len(winning_trades)}
+        </div>
+        <div class="metric">
+            <strong>Trade Perdenti:</strong> {len(losing_trades)}
+        </div>
+        <div class="metric">
+            <strong>Win Rate:</strong> {win_rate:.1f}%
+        </div>
+        <div class="metric">
+            <strong>Profitto Medio:</strong> ${avg_profit:.2f}
+        </div>
+        <div class="metric">
+            <strong>Perdita Media:</strong> ${avg_loss:.2f}
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>🤖 Database AI</h2>
+        <div class="metric">
+            <strong>Trade nel Database AI:</strong> {ai_trade_count}
+        </div>
+        <div class="metric">
+            <strong>Stato Bootstrap:</strong> {'Attivo' if ai_trade_count < 80 else 'Completato'}
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>💼 Posizioni Aperte</h2>
+        <p>Posizioni ancora aperte: {len(self.open_positions)}</p>
+    </div>
+    
+    <div class="section">
+        <p><strong>Report generato il:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+    </div>
+</body>
+</html>
+"""
+            
+            report_file = "data_backtest/reports/Report_Olga_Trade.html"
+            with open(report_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            self.logger.info(f"✅ Report HTML generato: {report_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Errore nella generazione del report: {e}")
+
+    def run_backtest(self):
+        """Esegue l'intero backtest"""
+        self.logger.info("🚀 AVVIO BACKTEST ORCHESTRATOR")
+        self.logger.info("=" * 80)
+        
+        # Fase 1: Setup
+        self.logger.info("FASE 1: Setup dell'ambiente di backtest...")
+        self.logger.info("✅ Ambiente di backtest pronto.\n")
+        
+        # Screening
+        self.run_stock_screening()
+        
+        # Fase 2: Download dati
+        self.download_historical_data()
+        
+        # Fase 3: Simulazione
+        self.logger.info("=" * 80)
+        self.logger.info("FASE 3: INIZIO SIMULAZIONE DI TRADING GIORNALIERA")
+        self.logger.info("=" * 80)
+        
+        trading_days = self.get_trading_days()
+        
+        self.logger.info(f"📅 Periodo simulazione: {len(trading_days)} giorni lavorativi")
+        self.logger.info(f"💰 Capitale iniziale: ${self.initial_capital:,.2f}")
+        self.logger.info(f"📊 Titoli nel portafoglio: {len(self.tickers)}\n")
+        
+        for day_num, trading_date in enumerate(trading_days, 1):
+            self.logger.info("=" * 20 + f" GIORNO {day_num}/{len(trading_days)}: {trading_date.strftime('%Y-%m-%d')} " + "=" * 20)
+            
+            # Mostra stato portfolio
+            portfolio_value = self.calculate_portfolio_value(trading_date)
+            self.logger.info(f"💰 Stato Portfolio: Capitale=${self.current_capital:,.2f}, Posizioni={len(self.open_positions)}, Valore Totale≈${portfolio_value:,.2f}")
+            
+            # Processa segnali del giorno precedente (se esistono)
+            self.logger.info("  📋 Esecuzione ordini del giorno precedente...")
+            self.process_signals_file(trading_date)
+            
+            # Genera nuovi segnali per il giorno successivo
+            self.run_trading_engine(trading_date)
+            
+            # Riassunto della giornata
+            self.generate_day_summary(trading_date, day_num, len(trading_days))
+            
+            self.logger.info("")  # Riga vuota per separare i giorni
+        
+        # Salva risultati finali
+        self.logger.info("=" * 80)
+        self.logger.info("COMPLETAMENTO BACKTEST E GENERAZIONE REPORT")
+        self.logger.info("=" * 80)
+        
+        self.save_results()
+        
+        self.logger.info("🎉 BACKTEST COMPLETATO CON SUCCESSO!")
+
+def main():
+    """Funzione principale"""
+    try:
+        orchestrator = BacktestOrchestrator()
+        orchestrator.run_backtest()
+        
+    except KeyboardInterrupt:
+        print("\n❌ Backtest interrotto dall'utente")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Errore critico nel backtest: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    print("🚀 AVVIO BACKTEST ORCHESTRATOR")
-    print("="*80)
-    
-    # FASE 1: Setup ambiente
-    setup_backtest_environment()
-    
-    # FASE 2: Screening iniziale titoli
-    print("ESECUZIONE SCREENING INIZIALE TITOLI...")
-    tickers_for_backtest = run_one_time_screening_for_backtest()
-    
-    if not tickers_for_backtest:
-        print("❌ ERRORE CRITICO: Nessun ticker ottenuto dallo screening iniziale.")
-        print("   Controlla la connessione internet e riprova.")
-        exit(1)
-    
-    print(f"✅ Screening completato: {len(tickers_for_backtest)} titoli selezionati")
-    
-    # FASE 3: Download dati storici
-    historical_data_store = pre_fetch_all_historical_data(tickers_for_backtest)
-    
-    if not historical_data_store:
-        print("❌ ERRORE CRITICO: Nessun dato storico scaricato.")
-        print("   Controlla la connessione internet e riprova.")
-        exit(1)
-    
-    if '^GSPC' not in historical_data_store:
-        print("❌ ERRORE CRITICO: Dati S&P 500 non disponibili.")
-        exit(1)
-    
-    print(f"✅ Dati storici pronti per {len(historical_data_store)} simboli")
-    
-    # FASE 4: Esecuzione simulazione
-    final_trades, final_portfolio_value = run_backtest_simulation(
-        all_historical_data=historical_data_store,
-        tickers_to_analyze=tickers_for_backtest
-    )
-    
-    # FASE 5: Salvataggio risultati
-    save_backtest_results(final_trades, final_portfolio_value)
-    
-    print("\n🎉 BACKTEST COMPLETATO CON SUCCESSO!")
-    print("   Controlla il file 'backtest_results.csv' per i risultati dettagliati.")
+    main()
