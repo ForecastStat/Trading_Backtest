@@ -855,22 +855,57 @@ class PerformanceLearner:
             best_params = grid_search.best_params_
     
             # NUOVO: Validazione robustezza modello
+            # train_score = self.model.score(X_train_scaled, y_train)
+            # test_score = self.model.score(X_test_scaled, y_test)
+            
+            # # OTTIMIZZAZIONE: Rilevamento overfitting
+            # overfitting_ratio = train_score / test_score if test_score > 0 else float('inf')
+            
+            # if overfitting_ratio > 1.3:  # Se overfitting eccessivo
+            #     self.logger.warning(f"Potential overfitting detected (train/test ratio: {overfitting_ratio:.2f})")
+            
+                # # Retraining con parametri più conservativi
+                # conservative_params = best_params.copy()
+                # conservative_params['max_depth'] = min(6, conservative_params.get('max_depth', 6))
+                # conservative_params['min_samples_split'] = max(5, conservative_params.get('min_samples_split', 5))
+                
+                # self.model = RandomForestRegressor(**conservative_params, random_state=42, n_jobs=1)
+                # self.model.fit(X_train_scaled, y_train)
+                # test_score = self.model.score(X_test_scaled, y_test)
+            
             train_score = self.model.score(X_train_scaled, y_train)
             test_score = self.model.score(X_test_scaled, y_test)
             
-            # OTTIMIZZAZIONE: Rilevamento overfitting
-            overfitting_ratio = train_score / test_score if test_score > 0 else float('inf')
+            # --- INIZIO DELLA MODIFICA ---
+            # OTTIMIZZAZIONE: Rilevamento overfitting con gestione robusta del test_score nullo.
+            overfitting_ratio = 0.0
+            is_overfitting = False
             
-            if overfitting_ratio > 1.3:  # Se overfitting eccessivo
-                self.logger.warning(f"Potential overfitting detected (train/test ratio: {overfitting_ratio:.2f})")
-                # Retraining con parametri più conservativi
+            if test_score > 0:
+                overfitting_ratio = train_score / test_score
+                # Un modello è considerato "overfittato" se performa molto meglio sui dati di training che su quelli di test.
+                if overfitting_ratio > 2.0: # Soglia più realistica per il rilevamento
+                    is_overfitting = True
+                    self.logger.warning(f"Potential overfitting detected (train/test ratio: {overfitting_ratio:.2f})")
+            elif train_score > 0.1: # Se il modello ha imparato qualcosa sui dati di train ma fallisce completamente su quelli di test
+                is_overfitting = True
+                overfitting_ratio = float('inf') # Manteniamo il valore 'inf' per il logging
+                self.logger.warning(f"Severe overfitting detected: Model failed on test data (Test Score: {test_score:.3f}, Train Score: {train_score:.3f})")
+            
+            if is_overfitting:
+                # Retraining con parametri più conservativi (questa logica è già presente e corretta)
                 conservative_params = best_params.copy()
                 conservative_params['max_depth'] = min(6, conservative_params.get('max_depth', 6))
-                conservative_params['min_samples_split'] = max(5, conservative_params.get('min_samples_split', 5))
+                conservative_params['min_samples_split'] = max(8, conservative_params.get('min_samples_split', 8)) # Aumentato per più cautela
                 
+                self.logger.info("--> Retraining with more conservative parameters to reduce overfitting...")
                 self.model = RandomForestRegressor(**conservative_params, random_state=42, n_jobs=1)
                 self.model.fit(X_train_scaled, y_train)
+                
+                # Ricalcola i punteggi dopo il retraining per verificare il miglioramento
+                train_score = self.model.score(X_train_scaled, y_train)
                 test_score = self.model.score(X_test_scaled, y_test)
+            
     
             self.logger.info(f"AI Model optimized: Best params: {best_params}")
             self.logger.info(f"Performance: Train={train_score:.3f}, Test={test_score:.3f}")
