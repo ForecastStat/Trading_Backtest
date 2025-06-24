@@ -517,45 +517,81 @@ def save_backtest_results(closed_trades, final_value):
     print("="*80)
 
 if __name__ == "__main__":
-    print("🚀 AVVIO BACKTEST ORCHESTRATOR")
-    print("="*80)
+    # --- INIZIO BLOCCO MODIFICATO ---
+
+    # Import necessari per il logging e la gestione dei file
+    import logging
+    from pathlib import Path
+    from datetime import datetime
+
+    # Definisci le directory qui, in modo che siano accessibili
+    BASE_DIR = Path.cwd()
+    REPORTS_DIR = BASE_DIR / "data_backtest" / "reports"
+    # Assicurati che la cartella dei report esista
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     
+    # 1. Definisci il nome del file di log (fisso, per sovrascriverlo)
+    log_filepath = REPORTS_DIR / "backtest_log.txt"
+
+    # 2. Configura il sistema di logging.
+    #    - level=logging.INFO: Cattura tutti i messaggi informativi, di avviso e di errore.
+    #    - format: Definisce come appare ogni riga del log (data, ora, livello, messaggio).
+    #    - handlers: Specifica dove inviare i log.
+    #    - filemode='w': Questa è la chiave! 'w' sta per 'write', e dice a Python
+    #      di sovrascrivere il file ogni volta che lo script parte.
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filepath, mode='w'), # Sovrascrive il file ad ogni esecuzione
+            logging.StreamHandler() # Mantiene l'output anche nel terminale
+        ]
+    )
+
+    logging.info("🚀 AVVIO BACKTEST ORCHESTRATOR")
+    logging.info("="*80)
+
     # FASE 1: Setup ambiente
+    # Anche i print() dentro questa funzione verranno catturati se lo script
+    # è eseguito da un terminale, ma per coerenza convertiamo i messaggi principali.
     setup_backtest_environment()
-    
+
     # FASE 2: Screening iniziale titoli
-    print("ESECUZIONE SCREENING INIZIALE TITOLI...")
+    logging.info("ESECUZIONE SCREENING INIZIALE TITOLI...")
     tickers_for_backtest = run_one_time_screening_for_backtest()
-    
+
     if not tickers_for_backtest:
-        print("❌ ERRORE CRITICO: Nessun ticker ottenuto dallo screening iniziale.")
-        print("   Controlla la connessione internet e riprova.")
+        logging.error("❌ ERRORE CRITICO: Nessun ticker ottenuto dallo screening iniziale.")
+        logging.error("   Controlla la connessione internet e riprova.")
         exit(1)
-    
-    print(f"✅ Screening completato: {len(tickers_for_backtest)} titoli selezionati")
-    
+
+    logging.info(f"✅ Screening completato: {len(tickers_for_backtest)} titoli selezionati")
+
     # FASE 3: Download dati storici
     historical_data_store = pre_fetch_all_historical_data(tickers_for_backtest)
-    
+
     if not historical_data_store:
-        print("❌ ERRORE CRITICO: Nessun dato storico scaricato.")
-        print("   Controlla la connessione internet e riprova.")
+        logging.error("❌ ERRORE CRITICO: Nessun dato storico scaricato.")
+        logging.error("   Controlla la connessione internet e riprova.")
         exit(1)
-    
+
     if '^GSPC' not in historical_data_store:
-        print("❌ ERRORE CRITICO: Dati S&P 500 non disponibili.")
+        logging.error("❌ ERRORE CRITICO: Dati S&P 500 non disponibili.")
         exit(1)
-    
-    print(f"✅ Dati storici pronti per {len(historical_data_store)} simboli")
-    
+
+    logging.info(f"✅ Dati storici pronti per {len(historical_data_store)} simboli")
+
     # FASE 4: Esecuzione simulazione
     final_trades, final_portfolio_value = run_backtest_simulation(
         all_historical_data=historical_data_store,
         tickers_to_analyze=tickers_for_backtest
     )
-    
+
     # FASE 5: Salvataggio risultati
     save_backtest_results(final_trades, final_portfolio_value)
+
+    logging.info("\n🎉 BACKTEST COMPLETATO CON SUCCESSO!")
+    logging.info("   Controlla il file 'backtest_results.csv' per i risultati dettagliati.")
+    logging.info(f"   Il log completo di questa esecuzione è stato salvato in: {log_filepath}")
     
-    print("\n🎉 BACKTEST COMPLETATO CON SUCCESSO!")
-    print("   Controlla il file 'backtest_results.csv' per i risultati dettagliati.")
+    # --- FINE BLOCCO MODIFICATO ---
