@@ -2585,7 +2585,8 @@ class IntegratedRevolutionaryTradingEngine:
         # Parametri per l'apprendimento continuo dell'AI
         self.ai_training_frequency_days = 7
         self.ai_training_frequency_new_closed_trades = 20
-        self.last_ai_training_date = datetime.min
+        #self.last_ai_training_date = datetime.min
+        self.last_ai_training_date = datetime(2014, 1, 1)
         self.total_closed_trades_at_last_ai_training = 0
         
         self.ai_trade_count = 0
