@@ -1026,11 +1026,24 @@ class PerformanceLearner:
             is_anomaly = self.anomaly_detector.predict(X_scaled)[0] == -1
             
             # OTTIMIZZAZIONE: Confidence multi-fattoriale
-            feature_importance = getattr(self.model, 'feature_importances_', np.ones(len(feature_values)) / len(feature_values))
-            importance_weighted_confidence = np.average(
-                [1.0 if 0.3 <= val <= 0.7 else 0.5 for val in feature_values[:5]],  # Solo per features core
-                weights=feature_importance[:5]
-            )
+            feature_importance = getattr(self.model, 'feature_importances_', [])
+
+            # Seleziona i pesi per le prime 5 features
+            weights_for_avg = feature_importance[:5] if len(feature_importance) >= 5 else [1] * 5
+            
+            # Calcola i valori da mediare
+            values_to_avg = [1.0 if 0.3 <= val <= 0.7 else 0.5 for val in feature_values[:5]]
+            
+            # Controlla se la somma dei pesi è maggiore di zero.
+            if np.sum(weights_for_avg) > 0:
+                # Se sì, usa la media pesata.
+                importance_weighted_confidence = np.average(
+                    values_to_avg,
+                    weights=weights_for_avg
+                )
+            else:
+                # Altrimenti, fai una media semplice (non pesata) come fallback sicuro.
+                importance_weighted_confidence = np.mean(values_to_avg)
             
             final_confidence = (consensus_confidence * 0.4 + 
                               importance_weighted_confidence * 0.4 + 
