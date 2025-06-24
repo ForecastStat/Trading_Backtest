@@ -96,7 +96,7 @@ class BacktestOrchestrator:
         success_count = 0
         for i, symbol in enumerate(all_symbols, 1):
             try:
-                self.logger.info(f"  Scaricando {symbol} ({i}/{len(all_symbols)})... ", end="")
+                self.logger.info(f"  Scaricando {symbol} ({i}/{len(all_symbols)})...")
                 
                 ticker = yf.Ticker(symbol)
                 data = ticker.history(
@@ -111,15 +111,15 @@ class BacktestOrchestrator:
                     data.to_csv(data_file)
                     self.stock_data[symbol] = data
                     success_count += 1
-                    self.logger.info("✅")
+                    self.logger.info(f"  ✅ {symbol} scaricato con successo")
                 else:
-                    self.logger.info("❌ (nessun dato)")
+                    self.logger.warning(f"  ❌ {symbol} - nessun dato disponibile")
                     
             except Exception as e:
-                self.logger.info(f"❌ (errore: {e})")
+                self.logger.error(f"  ❌ {symbol} - errore: {e}")
                 continue
         
-        self.logger.info(f"\n✅ Download completato: {success_count}/{len(all_symbols)} titoli scaricati con successo.")
+        self.logger.info(f"✅ Download completato: {success_count}/{len(all_symbols)} titoli scaricati con successo.")
         self.logger.info(f"✅ Dati storici pronti per {len(self.stock_data)} simboli")
 
     def get_trading_days(self):
@@ -348,7 +348,7 @@ class BacktestOrchestrator:
                 open_tickers = list(self.open_positions.keys())
                 self.logger.info(f"    📋 Posizioni da valutare per vendita: {open_tickers}")
             
-            # Simula la chiamata al trading engine
+            # Esegui il trading engine
             cmd = ["python", "trading_engine_backtest.py", date_str]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             
@@ -541,6 +541,11 @@ class BacktestOrchestrator:
         # Fase 2: Download dati
         self.download_historical_data()
         
+        # Verifica che abbiamo almeno alcuni dati
+        if len(self.stock_data) == 0:
+            self.logger.error("❌ ERRORE: Nessun dato scaricato. Impossibile continuare il backtest.")
+            return
+        
         # Fase 3: Simulazione
         self.logger.info("=" * 80)
         self.logger.info("FASE 3: INIZIO SIMULAZIONE DI TRADING GIORNALIERA")
@@ -552,6 +557,7 @@ class BacktestOrchestrator:
         self.logger.info(f"💰 Capitale iniziale: ${self.initial_capital:,.2f}")
         self.logger.info(f"📊 Titoli nel portafoglio: {len(self.tickers)}\n")
         
+        # BACKTEST COMPLETO - TUTTI I GIORNI
         for day_num, trading_date in enumerate(trading_days, 1):
             self.logger.info("=" * 20 + f" GIORNO {day_num}/{len(trading_days)}: {trading_date.strftime('%Y-%m-%d')} " + "=" * 20)
             
