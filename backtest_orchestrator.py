@@ -173,10 +173,17 @@ class BacktestOrchestrator:
             with open(signals_file, 'r') as f:
                 signals_data = json.load(f)
             
-            buy_signals = signals_data.get('buy_signals', [])
-            sell_signals = signals_data.get('sell_signals', [])
+            # Il nuovo formato ha signals -> buys/sells
+            signals_container = signals_data.get('signals', {})
+            buy_signals = signals_container.get('buys', [])
+            sell_signals = signals_container.get('sells', [])
             
-            self.logger.info(f"  📈 Esecuzione segnali per {date.strftime('%Y-%m-%d')}...")
+            # Se non trova il nuovo formato, prova il vecchio
+            if not buy_signals and not sell_signals:
+                buy_signals = signals_data.get('buy_signals', [])
+                sell_signals = signals_data.get('sell_signals', [])
+            
+            self.logger.info(f"  📈 Processando segnali per {date.strftime('%Y-%m-%d')}...")
             
             # Processa prima le vendite
             if sell_signals:
@@ -192,6 +199,8 @@ class BacktestOrchestrator:
                 
         except Exception as e:
             self.logger.error(f"Errore nel processare i segnali: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
 
     def process_sell_signals(self, sell_signals, date):
         """Processa i segnali di vendita"""
@@ -312,67 +321,92 @@ class BacktestOrchestrator:
         return portfolio_value
 
     def run_trading_engine(self, date):
-        """Esegue il trading engine per una specifica data"""
+        """Esegue il trading engine importandolo direttamente invece di subprocess"""
         try:
             # Prepara i parametri per il trading engine
             date_str = date.strftime('%Y-%m-%d')
             
-            self.logger.info(f"  🔍 Generazione analisi e segnali per domani...")
+            self.logger.info(f"  🔍 Generazione analisi e segnali per {date_str}...")
             
-            # Esegui analisi per tutti i ticker
-            self.logger.info(f"  Esecuzione analisi per {len(self.tickers)} tickers in data {date_str}")
-            
-            # Simula l'analisi per tutti i ticker
-            for ticker in self.tickers:
-                self.logger.info(f"  Analisi (offline) per {ticker}...")
-            
-            # Salva i risultati dell'analisi
-            analysis_file = "data_backtest/latest_analysis.json"
+            # Prepara i dati necessari
+            analysis_file = "data/latest_analysis.json"
             analysis_data = {
                 'date': date_str,
                 'tickers_analyzed': len(self.tickers),
                 'timestamp': datetime.now().isoformat()
             }
             
+            # Salva i dati di analisi simulati per il trading engine
             with open(analysis_file, 'w') as f:
                 json.dump(analysis_data, f, indent=2)
             
-            self.logger.info(f"✅ Risultati analisi salvati in '{os.path.abspath(analysis_file)}'.")
-            self.logger.info(f"  -> Analisi del giorno salvata in '{os.path.abspath(analysis_file)}'")
-            
-            # Esegui il trading engine
-            self.logger.info(f"    🔧 Inizializzazione trading engine con {len(self.open_positions)} posizioni aperte")
-            self.logger.info(f"    📊 Trading engine configurato: Capital=${self.current_capital:,.2f}, Posizioni={len(self.open_positions)}")
-            
-            if self.open_positions:
-                open_tickers = list(self.open_positions.keys())
-                self.logger.info(f"    📋 Posizioni da valutare per vendita: {open_tickers}")
-            
-            # Esegui il trading engine
-            cmd = ["python", "trading_engine_backtest.py", date_str]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            
-            if result.returncode == 0:
-                self.logger.info(f"    ✅ Segnali generati con successo")
+            # === NUOVO: IMPORTA E USA DIRETTAMENTE IL TRADING ENGINE ===
+            try:
+                # Importa la classe dal trading engine
+                import sys
+                import os
                 
-                # Conta i segnali generati (se il file esiste)
-                signals_file = "data/execution_signals.json"
-                if os.path.exists(signals_file):
-                    try:
-                        with open(signals_file, 'r') as f:
-                            signals_data = json.load(f)
-                        buy_count = len(signals_data.get('buy_signals', []))
-                        sell_count = len(signals_data.get('sell_signals', []))
-                        self.logger.info(f"    📊 Segnali generati: {buy_count} acquisti, {sell_count} vendite")
-                    except:
-                        self.logger.info(f"    📊 Segnali generati: file creato")
+                # Aggiungi il path corrente per l'import
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                if current_dir not in sys.path:
+                    sys.path.insert(0, current_dir)
+                
+                # Importa la classe del trading engine
+                from trading_engine_backtest import IntegratedRevolutionaryTradingEngine
+                
+                self.logger.info(f"    🔧 Inizializzazione trading engine per {date_str}")
+                
+                # Crea l'engine con i parametri corretti
+                engine = IntegratedRevolutionaryTradingEngine(
+                    capital=self.current_capital,
+                    open_positions=list(self.open_positions.values()),  # Converti dict in lista
+                    performance_db_path="data_backtest/ai_learning/performance.db"
+                )
+                
+                # Prepara i dati S&P 500 se disponibili
+                sp500_file = "data_backtest/^GSPC_data.csv"
+                if os.path.exists(sp500_file):
+                    import pandas as pd
+                    sp500_data = pd.read_csv(sp500_file, index_col=0, parse_dates=True)
                 else:
-                    self.logger.info(f"    📊 Segnali generati: 0 acquisti, 0 vendite")
-            else:
-                self.logger.error(f"Errore nell'esecuzione del trading engine: {result.stderr}")
-            
-        except subprocess.TimeoutExpired:
-            self.logger.error("Timeout nell'esecuzione del trading engine")
+                    import pandas as pd
+                    sp500_data = pd.DataFrame()  # DataFrame vuoto come fallback
+                
+                # Esegui la sessione di trading
+                success = engine.run_integrated_trading_session_for_backtest(
+                    analysis_data_path=analysis_file,
+                    sp500_data_full=sp500_data,
+                    current_backtest_date=date
+                )
+                
+                if success:
+                    self.logger.info(f"    ✅ Segnali generati con successo per {date_str}")
+                    
+                    # Conta i segnali generati (se il file esiste)
+                    signals_file = "data/execution_signals.json"
+                    if os.path.exists(signals_file):
+                        try:
+                            with open(signals_file, 'r') as f:
+                                signals_data = json.load(f)
+                            buy_count = len(signals_data.get('signals', {}).get('buys', []))
+                            sell_count = len(signals_data.get('signals', {}).get('sells', []))
+                            self.logger.info(f"    📊 Segnali generati: {buy_count} acquisti, {sell_count} vendite")
+                        except:
+                            self.logger.info(f"    📊 Segnali generati: file creato")
+                    else:
+                        self.logger.info(f"    📊 Segnali generati: 0 acquisti, 0 vendite")
+                else:
+                    self.logger.error(f"Trading engine ha restituito errori per {date_str}")
+                    
+            except ImportError as ie:
+                self.logger.error(f"Impossibile importare trading_engine_backtest: {ie}")
+                self.logger.error("Verifica che il file trading_engine_backtest.py sia presente")
+                
+            except Exception as engine_error:
+                self.logger.error(f"Errore nell'esecuzione diretta del trading engine: {engine_error}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+                
         except Exception as e:
             self.logger.error(f"Errore nell'esecuzione del trading engine: {e}")
 
