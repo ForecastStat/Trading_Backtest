@@ -11,6 +11,17 @@ dependency_logger = logging.getLogger('DependencyLoader')
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 warnings.filterwarnings('ignore', message='.*pkg_resources.*')
 
+# Fix per NumPy 2.0 - Questo è il punto cruciale
+try:
+    import numpy as np
+    # Crea l'alias NaN se non esiste (compatibilità con NumPy 2.0)
+    if not hasattr(np, 'NaN'):
+        np.NaN = np.nan
+        dependency_logger.info("✅ [GITHUB] NumPy.NaN alias created for compatibility.")
+except ImportError as e:
+    dependency_logger.error(f"❌ Critical: numpy import failed: {e}")
+    sys.exit(1) # Esce se numpy non può essere importato
+
 if os.environ.get('GITHUB_ACTIONS') == 'true':
     dependency_logger.info("[GITHUB] 🔧 Comprehensive dependency fix starting...")
     
