@@ -27,12 +27,9 @@ from datetime import datetime
 
 # Definisci le directory qui, in modo che siano accessibili
 BASE_DIR = Path.cwd()
-REPORTS_DIR = BASE_DIR / "data_backtest" / "reports"
-# Assicurati che la cartella dei report esista
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-
-# 1. Definisci il nome del file di log (fisso, per sovrascriverlo)
-log_filepath = REPORTS_DIR / "backtest_log.txt"
+LOGS_DIR = BASE_DIR / "logs"  # Cartella nella root del progetto
+LOGS_DIR.mkdir(parents=True, exist_ok=True)  # Crea la cartella se non esiste
+log_filepath = LOGS_DIR / "backtest_log.txt"  # File nella root/logs/
 
 # 2. Configura il sistema di logging.
 #    - level=logging.INFO: Cattura tutti i messaggi informativi, di avviso e di errore.
@@ -49,6 +46,7 @@ logging.basicConfig(
     ]
 )
 
+logging.info("🚀 SISTEMA DI LOGGING ATTIVATO - File salvato in: " + str(log_filepath))
 
 # --- IMPORTAZIONE DELLE LOGICHE MODIFICATE ---
 try:
@@ -309,9 +307,12 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
 
 def run_backtest_simulation(all_historical_data, tickers_to_analyze):
     """FASE 3: Simulazione di trading giornaliera con sincronizzazione del DB AI."""
-    logging.info("\n" + "="*80)
-    logging.info("FASE 3: INIZIO SIMULAZIONE DI TRADING GIORNALIERA")
+    
+    
     logging.info("="*80)
+    logging.info("INIZIO SIMULAZIONE DI TRADING GIORNALIERA")
+    logging.info("="*80)
+    
     
     # INIZIALIZZAZIONE STATO PORTAFOGLIO
     capital = INITIAL_CAPITAL
