@@ -593,5 +593,3 @@ if __name__ == "__main__":
     logging.info("\n🎉 BACKTEST COMPLETATO CON SUCCESSO!")
     logging.info("   Controlla il file 'backtest_results.csv' per i risultati dettagliati.")
     logging.info(f"   Il log completo di questa esecuzione è stato salvato in: {log_filepath}")
-    
-    # --- FINE BLOCCO MODIFICATO ---
