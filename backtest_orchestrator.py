@@ -275,8 +275,10 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
     
     return capital, open_positions, closed_trades
 
+# In backtest_orchestrator.py, sostituisci l'INTERA funzione run_backtest_simulation
+
 def run_backtest_simulation(all_historical_data, tickers_to_analyze):
-    """FASE 3: Simulazione di trading giornaliera"""
+    """FASE 3: Simulazione di trading giornaliera con sincronizzazione del DB AI."""
     print("\n" + "="*80)
     print("FASE 3: INIZIO SIMULAZIONE DI TRADING GIORNALIERA")
     print("="*80)
@@ -286,7 +288,12 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
     open_positions = []
     closed_trades = []
     
-    # Genera range di date di trading (solo giorni lavorativi)
+    # Definiamo i percorsi del DB qui per chiarezza
+    PERSISTENT_AI_DB_FILE = AI_DB_FILE # Il DB gestito dall'orchestratore
+    ENGINE_AI_DIR = BASE_DIR / "data" / "ai_learning" # La cartella che l'engine si aspetta
+    ENGINE_AI_DB_FILE = ENGINE_AI_DIR / "performance.db" # Il DB che l'engine usa
+
+    # Genera range di date di trading
     date_range = pd.date_range(start=START_DATE, end=END_DATE, freq='B')
     sp500_data = all_historical_data.get('^GSPC')
     
@@ -305,125 +312,107 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
         
         print(f"\n{'='*20} GIORNO {day_num}/{len(date_range)}: {current_date_str} {'='*20}")
         
-        # STATO INIZIALE DEL GIORNO
         portfolio_value = capital
         for pos in open_positions:
             try:
                 current_price_data = all_historical_data[pos['ticker']].loc[current_date_str]['Close']
-                # Assicurati che sia un numero singolo
-                if hasattr(current_price_data, 'iloc'):
-                    current_price = float(current_price_data.iloc[0])
-                else:
-                    current_price = float(current_price_data)
-                portfolio_value += pos['quantity'] * current_price
+                portfolio_value += pos['quantity'] * float(current_price_data)
             except:
-                portfolio_value += pos['trade_value']  # Fallback al valore di acquisto
+                portfolio_value += pos['trade_value']
         
         print(f"💰 Stato Portfolio: Capitale=${capital:,.2f}, Posizioni={len(open_positions)}, Valore Totale≈${portfolio_value:,.2f}")
         
-        # STEP 1: ESECUZIONE ORDINI DEL GIORNO PRECEDENTE
         if EXECUTION_SIGNALS_FILE.exists():
             print("  📋 Esecuzione ordini del giorno precedente...")
             try:
                 with open(EXECUTION_SIGNALS_FILE, 'r') as f:
-                    signals_data = json.load(f)
-                
-                signals = signals_data.get('signals', {})
+                    signals = json.load(f).get('signals', {})
                 if signals:
                     capital, open_positions, closed_trades = execute_signals_for_day(
                         signals, all_historical_data, current_date, capital, open_positions, closed_trades
                     )
                 else:
                     print("    ℹ️ Nessun segnale da eseguire")
-                
-                # Rimuovi il file dei segnali dopo l'esecuzione
                 os.remove(EXECUTION_SIGNALS_FILE)
-                
             except Exception as e:
                 print(f"    ❌ ERRORE processando segnali: {e}")
         else:
             print("  ℹ️ Nessun file di segnali da processare")
         
-        # STEP 2: GENERAZIONE ANALISI E NUOVI SEGNALI
         print("  🔍 Generazione analisi e segnali per domani...")
         try:
-            # Genera analisi per la data corrente
             run_analysis_for_date(tickers_to_analyze, all_historical_data, current_date, ANALYSIS_FILE_PATH)
             
-            # CORREZIONE CRUCIALE: Passa le posizioni aperte al trading engine
-            # Converti le posizioni nel formato che il trading engine si aspetta
             engine_positions = convert_positions_for_trading_engine(open_positions, current_date)
             
+            # --- INIZIO BLOCCO DI SINCRONIZZAZIONE DB (Pre-Esecuzione) ---
+            print("    🔄 Sincronizzazione Database AI (Pre-Esecuzione)...")
+            try:
+                ENGINE_AI_DIR.mkdir(parents=True, exist_ok=True)
+                if PERSISTENT_AI_DB_FILE.exists():
+                    shutil.copy2(PERSISTENT_AI_DB_FILE, ENGINE_AI_DB_FILE)
+                    print(f"      ✅ Copiato DB persistente in {ENGINE_AI_DB_FILE} per l'engine.")
+                else:
+                    print(f"      ℹ️ Nessun DB persistente trovato. L'engine ne creerà uno nuovo.")
+            except Exception as sync_err:
+                print(f"      ❌ Errore durante la sincronizzazione Pre-Esecuzione: {sync_err}")
+            # --- FINE BLOCCO DI SINCRONIZZAZIONE DB ---
+
             print(f"    🔧 Inizializzazione trading engine con {len(engine_positions)} posizioni aperte")
             
-            # Istanza del trading engine con le posizioni aperte correnti
+            # L'engine ora troverà il DB nel suo percorso atteso "data/ai_learning/performance.db"
             engine = IntegratedRevolutionaryTradingEngine(
                 capital=capital,
-                open_positions=engine_positions,  # PASSA LE POSIZIONI APERTE
-                performance_db_path=str(AI_DB_FILE)
+                open_positions=engine_positions,
+                performance_db_path=str(ENGINE_AI_DB_FILE) # Passiamo il percorso che userà
             )
             
-            # Passa la cronologia dei trade all'engine per l'apprendimento AI
             engine.trade_history = closed_trades.copy()
             engine._register_historical_trades_in_ai()
             
-            # Debug logging
             print(f"    📊 Trading engine configurato: Capital=${capital:,.2f}, Posizioni={len(engine_positions)}")
             if engine_positions:
                 print(f"    📋 Posizioni da valutare per vendita: {[pos['ticker'] for pos in engine_positions]}")
-            
-            # Esegue la sessione di trading per generare i segnali
+
             try:
-                success = engine.run_integrated_trading_session_for_backtest(
+                engine.run_integrated_trading_session_for_backtest(
                     analysis_data_path=str(ANALYSIS_FILE_PATH),
                     sp500_data_full=sp500_data,
                     current_backtest_date=current_date
                 )
-            
-                if success:
-                    print("    ✅ Segnali generati con successo")
-                    
-                    # Verifica se sono stati generati segnali di vendita
-                    if EXECUTION_SIGNALS_FILE.exists():
-                        try:
-                            with open(EXECUTION_SIGNALS_FILE, 'r') as f:
-                                generated_signals = json.load(f)
-                            sell_count = len(generated_signals.get('signals', {}).get('sells', []))
-                            buy_count = len(generated_signals.get('signals', {}).get('buys', []))
-                            print(f"    📊 Segnali generati: {buy_count} acquisti, {sell_count} vendite")
-                        except:
-                            print("    ℹ️ Impossibile leggere dettagli segnali generati")
-                    
-                else:
-                    print("    ⚠️ Generazione segnali completata con avvisi")
-                    
+                print("    ✅ Sessione di trading dell'engine completata.")
             except Exception as e:
-                print(f"    ⚠️ Errore nella generazione segnali: {str(e)[:100]}...")
-                # Continua il backtest anche se ci sono errori nella generazione segnali
+                print(f"    ⚠️ Errore nell'esecuzione dell'engine: {str(e)[:100]}...")
                 import traceback
-                print("    🔍 Stack trace dell'errore:")
                 traceback.print_exc()
-                
+
+            # --- INIZIO BLOCCO DI SINCRONIZZAZIONE DB (Post-Esecuzione) ---
+            print("    🔄 Sincronizzazione Database AI (Post-Esecuzione)...")
+            try:
+                if ENGINE_AI_DB_FILE.exists():
+                    shutil.copy2(ENGINE_AI_DB_FILE, PERSISTENT_AI_DB_FILE)
+                    print(f"      ✅ Copiato DB aggiornato dall'engine in {PERSISTENT_AI_DB_FILE} per la persistenza.")
+                else:
+                    print(f"      ⚠️ L'engine non ha creato/modificato il suo file DB. Nessuna sincronizzazione Post-Esecuzione.")
+            except Exception as sync_err:
+                print(f"      ❌ Errore durante la sincronizzazione Post-Esecuzione: {sync_err}")
+            # --- FINE BLOCCO DI SINCRONIZZAZIONE DB ---
+
         except Exception as e:
             print(f"    ❌ ERRORE nella generazione segnali: {e}")
             import traceback
             traceback.print_exc()
         
-        # LOG FINALE DEL GIORNO
         print(f"  📊 Fine giornata: Capitale=${capital:,.2f}, Posizioni Aperte={len(open_positions)}, Trade Chiusi Totali={len(closed_trades)}")
-        
-        # Debug per verificare che i trade chiusi vengano registrati
         if len(closed_trades) > 0:
             last_trade = closed_trades[-1]
             print(f"  🔍 Ultimo trade chiuso: {last_trade['ticker']} P/L={last_trade['profit_percentage']:+.1f}%")
         
-        # Progress update ogni 50 giorni
         if day_num % 50 == 0:
             progress_pct = (day_num / len(date_range)) * 100
             print(f"\n🚀 PROGRESSO BACKTEST: {progress_pct:.1f}% completato ({day_num}/{len(date_range)} giorni)")
             print(f"   📊 Trade chiusi finora: {len(closed_trades)}")
     
-    # CALCOLO VALORE FINALE
     print(f"\n{'='*80}")
     print("SIMULAZIONE COMPLETATA")
     print("="*80)
@@ -435,8 +424,7 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
         print(f"📊 Posizioni aperte da liquidare: {len(open_positions)}")
         for pos in open_positions:
             try:
-                last_price_data = all_historical_data[pos['ticker']]['Close'].iloc[-1]
-                last_price = float(last_price_data)
+                last_price = float(all_historical_data[pos['ticker']]['Close'].iloc[-1])
                 position_value = pos['quantity'] * last_price
                 final_portfolio_value += position_value
                 print(f"  - {pos['ticker']}: {pos['quantity']} azioni @ ${last_price:.2f} = ${position_value:,.2f}")
