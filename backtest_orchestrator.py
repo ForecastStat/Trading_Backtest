@@ -59,8 +59,8 @@ except ImportError as e:
     exit()
 
 # --- CONFIGURAZIONE DEL BACKTEST ---
-START_DATE = '2024-01-01'
-END_DATE = '2024-12-31'
+START_DATE = '2025-04-01'
+END_DATE = '2025-06-23'
 INITIAL_CAPITAL = 100000.0
 
 BASE_DIR = Path.cwd()
