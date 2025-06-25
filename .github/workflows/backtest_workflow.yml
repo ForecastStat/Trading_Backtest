@@ -69,7 +69,7 @@ jobs:
           path: |
             backtest_results.csv
             data_backtest/ai_learning/performance.db
-            data_backtest/reports/backtest_log.txt
+            logs/backtest_log.txt
             data_backtest/trading_integrated.log
 
       # --- FINE BLOCCO MODIFICATO ---
