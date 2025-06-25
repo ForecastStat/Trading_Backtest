@@ -6728,27 +6728,19 @@ class IntegratedRevolutionaryTradingEngine:
     def run_integrated_trading_session_for_backtest(self, analysis_data_path, sp500_data_full, current_backtest_date):
         """
         Versione per il backtest della sessione di trading.
-        INCLUDE LA REGISTRAZIONE DEI TRADE STORICI AL SUO INTERNO.
+        La registrazione dei trade ora viene gestita dall'orchestratore PRIMA di chiamare questa funzione.
         """
         try:
             self.logger.info(f"--- Esecuzione Sessione di Trading (Backtest) per il {current_backtest_date.strftime('%Y-%m-%d')} ---")
             
-            # --- INIZIO BLOCCO MODIFICATO ---
-            # 1. Registra i trade storici PRIMA di fare qualsiasi altra cosa.
-            #    L'engine ha ricevuto 'self.trade_history' dall'orchestratore.
-            #    Ora gli diciamo di scriverli nel suo DB.
-            if self.ai_enabled and self.meta_orchestrator:
-                self._register_historical_trades_in_ai()
-            # --- FINE BLOCCO MODIFICATO ---
-
-            # 2. Caricamento dati di analisi
+            # 1. Caricamento dati di analisi (la registrazione dei trade è già avvenuta)
             self.analysis_data_file = Path(analysis_data_path)
             analysis_data = self.load_analysis_data()
             if not analysis_data:
                 self.logger.error("Dati di analisi non disponibili, sessione terminata.")
                 return False
             
-            # 3. Rileva il trend di mercato
+            # 2. Rileva il trend di mercato
             sp500_data_slice = sp500_data_full.loc[:current_backtest_date]
             overall_market_trend_today = self.detect_overall_market_trend(sp500_data_slice) 
             self.last_overall_trend = overall_market_trend_today
@@ -6756,7 +6748,7 @@ class IntegratedRevolutionaryTradingEngine:
             max_pos_for_regime = self.max_positions_per_regime.get(self.last_overall_trend, 8)
             max_positions_allowed_today = min(self.max_simultaneous_positions, max_pos_for_regime)
             
-            # 4. Logica di apprendimento AI
+            # 3. Logica di apprendimento AI
             if self.ai_enabled and self.meta_orchestrator:
                 try:
                     with sqlite3.connect(self.meta_orchestrator.performance_learner.db_path) as conn:
@@ -6766,7 +6758,6 @@ class IntegratedRevolutionaryTradingEngine:
                     self.current_closed_ai_trades = 0
                 
                 new_closed_trades_count = self.current_closed_ai_trades - self.total_closed_trades_at_last_ai_training
-                # La logica di training con la patch per la data ora funzionerà
                 if ((current_backtest_date - self.last_ai_training_date).days >= self.ai_training_frequency_days or
                     new_closed_trades_count >= self.ai_training_frequency_new_closed_trades):
                     
@@ -6775,7 +6766,7 @@ class IntegratedRevolutionaryTradingEngine:
                         self.last_ai_training_date = current_backtest_date
                         self.total_closed_trades_at_last_ai_training = self.current_closed_ai_trades
             
-            # 5. Generazione segnali
+            # 4. Generazione segnali
             buy_signals_map = self.generate_ensemble_signals(analysis_data)
             sell_signals_map = self.generate_sell_signals(analysis_data, is_backtest=True)
             
@@ -6794,6 +6785,7 @@ class IntegratedRevolutionaryTradingEngine:
             import traceback
             self.logger.error(traceback.format_exc())
             return False
+
     
     
 # === MAIN EXECUTION ===
