@@ -1,5 +1,3 @@
-# .github/workflows/backtest_workflow.yml
-
 name: Backtest Trading System
 
 # --- QUANDO ESEGUIRE IL WORKFLOW ---
