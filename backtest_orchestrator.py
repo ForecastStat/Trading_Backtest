@@ -1,4 +1,10 @@
-# backtest_orchestrator.py
+# In backtest_orchestrator.py
+
+# ==============================================================================
+# --- PATCH DI COMPATIBILITÀ PER NUMPY 2.0 ---
+import numpy as np
+if not hasattr(np, 'NaN'):
+    np.NaN = np.nan
 
 # ==============================================================================
 # --- IMPORTAZIONI E CONFIGURAZIONE LOGGING (spostato all'inizio) ---
