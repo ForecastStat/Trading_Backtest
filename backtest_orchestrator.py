@@ -20,6 +20,36 @@ import time
 
 warnings.filterwarnings('ignore')
 
+
+import logging
+from pathlib import Path
+from datetime import datetime
+
+# Definisci le directory qui, in modo che siano accessibili
+BASE_DIR = Path.cwd()
+REPORTS_DIR = BASE_DIR / "data_backtest" / "reports"
+# Assicurati che la cartella dei report esista
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# 1. Definisci il nome del file di log (fisso, per sovrascriverlo)
+log_filepath = REPORTS_DIR / "backtest_log.txt"
+
+# 2. Configura il sistema di logging.
+#    - level=logging.INFO: Cattura tutti i messaggi informativi, di avviso e di errore.
+#    - format: Definisce come appare ogni riga del log (data, ora, livello, messaggio).
+#    - handlers: Specifica dove inviare i log.
+#    - filemode='w': Questa è la chiave! 'w' sta per 'write', e dice a Python
+#      di sovrascrivere il file ogni volta che lo script parte.
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_filepath, mode='w'), # Sovrascrive il file ad ogni esecuzione
+        logging.StreamHandler() # Mantiene l'output anche nel terminale
+    ]
+)
+
+
 # --- IMPORTAZIONE DELLE LOGICHE MODIFICATE ---
 try:
     from best_buy_backtest import run_one_time_screening_for_backtest
@@ -49,37 +79,37 @@ HISTORICAL_EXECUTION_SIGNALS_FILE = SIGNALS_DIR / "historical_execution_signals.
 
 def setup_backtest_environment():
     """FASE 1: Setup dell'ambiente di backtest"""
-    print("FASE 1: Setup dell'ambiente di backtest...")
+    logging.info("FASE 1: Setup dell'ambiente di backtest...")
     if DATA_DIR.exists():
         shutil.rmtree(DATA_DIR)
-        print("  - Rimossa directory backtest esistente")
+        logging.info("  - Rimossa directory backtest esistente")
     
     # Crea tutte le directory necessarie
     for directory in [DATA_DIR, AI_LEARNING_DIR, REPORTS_DIR, SIGNALS_HISTORY_DIR, SIGNALS_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
-        print(f"  - Creata directory: {directory}")
+        logging.info(f"  - Creata directory: {directory}")
     
     # Inizializza il database AI vuoto
     AI_DB_FILE.touch()
-    print(f"  - Inizializzato database AI: {AI_DB_FILE}")
+    logging.info(f"  - Inizializzato database AI: {AI_DB_FILE}")
     
     # Inizializza il file dei segnali storici
     with open(HISTORICAL_EXECUTION_SIGNALS_FILE, 'w') as f:
         json.dump({"historical_signals": [], "last_updated": "", "total_signals": 0}, f, indent=2)
-    print(f"  - Inizializzato file segnali storici: {HISTORICAL_EXECUTION_SIGNALS_FILE}")
+    logging.info(f"  - Inizializzato file segnali storici: {HISTORICAL_EXECUTION_SIGNALS_FILE}")
     
-    print("✅ Ambiente di backtest pronto.\n")
+    logging.info("✅ Ambiente di backtest pronto.\n")
 
 def pre_fetch_all_historical_data(tickers):
     """FASE 2: Download di tutti i dati storici necessari"""
-    print("FASE 2: Download di tutti i dati storici...")
+    logging.info("FASE 2: Download di tutti i dati storici...")
     
     # Scarica dati extra per indicatori tecnici
     fetch_start_date = (pd.to_datetime(START_DATE) - timedelta(days=365)).strftime('%Y-%m-%d')
     fetch_end_date = (pd.to_datetime(END_DATE) + timedelta(days=1)).strftime('%Y-%m-%d')
     
-    print(f"  - Periodo download: {fetch_start_date} a {fetch_end_date}")
-    print(f"  - Titoli da scaricare: {len(tickers)} + S&P 500")
+    logging.info(f"  - Periodo download: {fetch_start_date} a {fetch_end_date}")
+    logging.info(f"  - Titoli da scaricare: {len(tickers)} + S&P 500")
     
     all_data = {}
     tickers_to_fetch = tickers + ['^GSPC']  # Include S&P 500
@@ -88,7 +118,7 @@ def pre_fetch_all_historical_data(tickers):
     for i, ticker in enumerate(tickers_to_fetch):
         try:
             time.sleep(0.1)  # Rate limiting gentile
-            print(f"  Scaricando {ticker} ({i+1}/{len(tickers_to_fetch)})...", end=" ")
+            print(f"  Scaricando {ticker} ({i+1}/{len(tickers_to_fetch)})...", end=" ")  # Lascia questo print per vedere il progresso in tempo reale
             
             data = yf.download(
                 ticker, 
@@ -109,7 +139,7 @@ def pre_fetch_all_historical_data(tickers):
         except Exception as e:
             print(f"❌ (errore: {str(e)[:50]}...)")
     
-    print(f"\n✅ Download completato: {successful_downloads}/{len(tickers_to_fetch)} titoli scaricati con successo.")
+    logging.info(f"\n✅ Download completato: {successful_downloads}/{len(tickers_to_fetch)} titoli scaricati con successo.")
     return all_data
 
 def convert_positions_for_trading_engine(orchestrator_positions, current_date):
@@ -279,9 +309,9 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
 
 def run_backtest_simulation(all_historical_data, tickers_to_analyze):
     """FASE 3: Simulazione di trading giornaliera con sincronizzazione del DB AI."""
-    print("\n" + "="*80)
-    print("FASE 3: INIZIO SIMULAZIONE DI TRADING GIORNALIERA")
-    print("="*80)
+    logging.info("\n" + "="*80)
+    logging.info("FASE 3: INIZIO SIMULAZIONE DI TRADING GIORNALIERA")
+    logging.info("="*80)
     
     # INIZIALIZZAZIONE STATO PORTAFOGLIO
     capital = INITIAL_CAPITAL
@@ -437,19 +467,20 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
     
     return closed_trades, final_portfolio_value
 
+
 def save_backtest_results(closed_trades, final_value):
     """FASE 4: Salvataggio dei risultati del backtest"""
-    print("\n" + "="*80)
-    print("FASE 4: SALVATAGGIO DEI RISULTATI DEL BACKTEST")
-    print("="*80)
+    logging.info("\n" + "="*80)
+    logging.info("FASE 4: SALVATAGGIO DEI RISULTATI DEL BACKTEST")
+    logging.info("="*80)
     
     if not closed_trades:
-        print("⚠️ ATTENZIONE: Nessun trade è stato chiuso durante il backtest.")
-        print("   Questo può indicare:")
-        print("   - Sistema troppo conservativo")
-        print("   - Mancanza di segnali di vendita")
-        print("   - Errori nella generazione dei segnali")
-        print("   Il file CSV non verrà creato.")
+        logging.warning("⚠️ ATTENZIONE: Nessun trade è stato chiuso durante il backtest.")
+        logging.info("   Questo può indicare:")
+        logging.info("   - Sistema troppo conservativo")
+        logging.info("   - Mancanza di segnali di vendita")
+        logging.info("   - Errori nella generazione dei segnali")
+        logging.info("   Il file CSV non verrà creato.")
         return
     
     # Prepara DataFrame per CSV
@@ -466,17 +497,17 @@ def save_backtest_results(closed_trades, final_value):
     df_results.to_csv(output_filename, index=False)
     
     # Statistiche dettagliate
-    print(f"✅ Risultati salvati in '{output_filename}'")
-    print(f"\n📊 STATISTICHE BACKTEST:")
-    print(f"  📅 Periodo: {START_DATE} a {END_DATE}")
-    print(f"  💰 Capitale Iniziale: ${INITIAL_CAPITAL:,.2f}")
-    print(f"  💎 Valore Finale: ${final_value:,.2f}")
+    logging.info(f"✅ Risultati salvati in '{output_filename}'")
+    logging.info(f"\n📊 STATISTICHE BACKTEST:")
+    logging.info(f"  📅 Periodo: {START_DATE} a {END_DATE}")
+    logging.info(f"  💰 Capitale Iniziale: ${INITIAL_CAPITAL:,.2f}")
+    logging.info(f"  💎 Valore Finale: ${final_value:,.2f}")
     
     profit = final_value - INITIAL_CAPITAL
     profit_pct = (profit / INITIAL_CAPITAL) * 100
-    print(f"  📈 Profitto/Perdita: ${profit:,.2f} ({profit_pct:+.2f}%)")
+    logging.info(f"  📈 Profitto/Perdita: ${profit:,.2f} ({profit_pct:+.2f}%)")
     
-    print(f"  🔄 Trade Chiusi: {len(closed_trades)}")
+    logging.info(f"  🔄 Trade Chiusi: {len(closed_trades)}")
     
     if closed_trades:
         profitable_trades = [t for t in closed_trades if t['profit'] > 0]
@@ -484,57 +515,31 @@ def save_backtest_results(closed_trades, final_value):
         avg_profit = sum(t['profit'] for t in closed_trades) / len(closed_trades)
         avg_hold_days = sum(t['hold_days'] for t in closed_trades) / len(closed_trades)
         
-        print(f"  📊 Win Rate: {win_rate:.1f}% ({len(profitable_trades)}/{len(closed_trades)})")
-        print(f"  💵 Profitto Medio per Trade: ${avg_profit:,.2f}")
-        print(f"  ⏱️ Giorni di Holding Medi: {avg_hold_days:.1f}")
+        logging.info(f"  📊 Win Rate: {win_rate:.1f}% ({len(profitable_trades)}/{len(closed_trades)})")
+        logging.info(f"  💵 Profitto Medio per Trade: ${avg_profit:,.2f}")
+        logging.info(f"  ⏱️ Giorni di Holding Medi: {avg_hold_days:.1f}")
         
         # Verifica se il database AI è stato popolato
         try:
             with sqlite3.connect(AI_DB_FILE) as conn:
                 cursor = conn.execute('SELECT COUNT(*) FROM trades WHERE exit_date IS NOT NULL')
                 ai_trades_count = cursor.fetchone()[0]
-                print(f"  🧠 Trade nel database AI: {ai_trades_count}")
+                logging.info(f"  🧠 Trade nel database AI: {ai_trades_count}")
                 
                 if ai_trades_count >= 80:
-                    print("  🎉 DATABASE AI PRONTO! L'AI può ora essere attivata per trading reale.")
+                    logging.info("  🎉 DATABASE AI PRONTO! L'AI può ora essere attivata per trading reale.")
                 else:
-                    print(f"  ⏳ Database AI in crescita: {80 - ai_trades_count} trade ancora necessari per attivazione completa")
+                    logging.info(f"  ⏳ Database AI in crescita: {80 - ai_trades_count} trade ancora necessari per attivazione completa")
         except Exception as e:
-            print(f"  ⚠️ Errore verifica database AI: {e}")
+            logging.warning(f"  ⚠️ Errore verifica database AI: {e}")
     
-    print("="*80)
+    logging.info("="*80)
+
 
 if __name__ == "__main__":
     # --- INIZIO BLOCCO MODIFICATO ---
 
     # Import necessari per il logging e la gestione dei file
-    import logging
-    from pathlib import Path
-    from datetime import datetime
-
-    # Definisci le directory qui, in modo che siano accessibili
-    BASE_DIR = Path.cwd()
-    REPORTS_DIR = BASE_DIR / "data_backtest" / "reports"
-    # Assicurati che la cartella dei report esista
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # 1. Definisci il nome del file di log (fisso, per sovrascriverlo)
-    log_filepath = REPORTS_DIR / "backtest_log.txt"
-
-    # 2. Configura il sistema di logging.
-    #    - level=logging.INFO: Cattura tutti i messaggi informativi, di avviso e di errore.
-    #    - format: Definisce come appare ogni riga del log (data, ora, livello, messaggio).
-    #    - handlers: Specifica dove inviare i log.
-    #    - filemode='w': Questa è la chiave! 'w' sta per 'write', e dice a Python
-    #      di sovrascrivere il file ogni volta che lo script parte.
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_filepath, mode='w'), # Sovrascrive il file ad ogni esecuzione
-            logging.StreamHandler() # Mantiene l'output anche nel terminale
-        ]
-    )
 
     logging.info("🚀 AVVIO BACKTEST ORCHESTRATOR")
     logging.info("="*80)
