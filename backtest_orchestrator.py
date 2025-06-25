@@ -142,9 +142,25 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
     date_range = pd.date_range(start=START_DATE, end=END_DATE, freq='B')
     sp500_data = all_historical_data.get('^GSPC')
 
+    if sp500_data is None or sp500_data.empty:
+        logging.error("❌ ERRORE: Dati S&P 500 non disponibili per la simulazione")
+        return closed_trades, capital
+
     for day_num, current_date in enumerate(date_range, 1):
         current_date_str = current_date.strftime('%Y-%m-%d')
         logging.info(f"\n{'='*20} GIORNO {day_num}/{len(date_range)}: {current_date_str} {'='*20}")
+        
+        portfolio_value = capital
+        for pos in open_positions:
+            try:
+                current_price_data = all_historical_data[pos['ticker']].loc[current_date_str]['Close']
+                current_price = float(current_price_data.iloc[0] if hasattr(current_price_data, 'iloc') else current_price_data)
+                portfolio_value += pos['quantity'] * current_price
+            except Exception:
+                portfolio_value += pos['trade_value']
+        
+        logging.info(f"💰 Stato Portfolio: Capitale=${capital:,.2f}, Posizioni={len(open_positions)}, Valore Totale≈${portfolio_value:,.2f}")
+        
         if EXECUTION_SIGNALS_FILE.exists():
             try:
                 with open(EXECUTION_SIGNALS_FILE, 'r') as f:
@@ -155,30 +171,47 @@ def run_backtest_simulation(all_historical_data, tickers_to_analyze):
                 logging.error(f"    ❌ ERRORE processando segnali: {e}")
         
         logging.info("  🔍 Generazione analisi e segnali per domani...")
-        run_analysis_for_date(tickers_to_analyze, all_historical_data, current_date, ANALYSIS_FILE_PATH)
-        
-        engine = IntegratedRevolutionaryTradingEngine(capital=capital, open_positions=open_positions, performance_db_path=str(AI_DB_FILE))
-        # Passa i trade chiusi all'engine. La registrazione avverrà all'interno.
-        engine.trade_history = closed_trades.copy()
-        
-        engine.run_integrated_trading_session_for_backtest(
-            analysis_data_path=str(ANALYSIS_FILE_PATH),
-            sp500_data_full=sp500_data,
-            current_backtest_date=current_date
-        )
+        try:
+            run_analysis_for_date(tickers_to_analyze, all_historical_data, current_date, ANALYSIS_FILE_PATH)
+            
+            engine = IntegratedRevolutionaryTradingEngine(capital=capital, open_positions=open_positions, performance_db_path=str(AI_DB_FILE))
+            
+            # --- INIZIO BLOCCO CRUCIALE CORRETTO ---
+            # 1. Passa i trade chiusi all'engine
+            engine.trade_history = closed_trades.copy()
+            
+            # 2. ORDINA all'engine di registrarli nel suo DB.
+            #    Questa chiamata è fondamentale e deve avvenire QUI, prima di avviare la sessione di trading.
+            if engine.ai_enabled:
+                 engine._register_historical_trades_in_ai()
+            # --- FINE BLOCCO CRUCIALE CORRETTO ---
+
+            engine.run_integrated_trading_session_for_backtest(
+                analysis_data_path=str(ANALYSIS_FILE_PATH),
+                sp500_data_full=sp500_data,
+                current_backtest_date=current_date
+            )
+        except Exception as e:
+            logging.error(f"    ❌ ERRORE CRITICO nella generazione segnali: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
         
         logging.info(f"  📊 Fine giornata: Capitale=${capital:,.2f}, Posizioni Aperte={len(open_positions)}, Trade Chiusi Totali={len(closed_trades)}")
 
     logging.info("\n" + "="*80 + "\nSIMULAZIONE COMPLETATA\n" + "="*80)
     final_portfolio_value = capital
     if open_positions:
+        logging.info(f"📊 Posizioni aperte da liquidare: {len(open_positions)}")
         for pos in open_positions:
             try:
                 last_price = float(all_historical_data[pos['ticker']]['Close'].iloc[-1])
                 final_portfolio_value += pos['quantity'] * last_price
+                logging.info(f"  - Liquidazione {pos['ticker']}: {pos['quantity']} azioni @ ${last_price:.2f}")
             except Exception:
                 final_portfolio_value += pos['trade_value']
+                logging.warning(f"  - Liquidazione {pos['ticker']}: prezzo finale non disponibile, uso valore di acquisto.")
     
+    logging.info(f"💎 Valore finale totale portafoglio: ${final_portfolio_value:,.2f}")
     return closed_trades, final_portfolio_value
 
 def save_backtest_results(closed_trades, final_value):
