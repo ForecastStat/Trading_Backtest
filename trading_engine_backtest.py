@@ -11,17 +11,6 @@ dependency_logger = logging.getLogger('DependencyLoader')
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 warnings.filterwarnings('ignore', message='.*pkg_resources.*')
 
-# Fix per NumPy 2.0 - Questo è il punto cruciale
-try:
-    import numpy as np
-    # Crea l'alias NaN se non esiste (compatibilità con NumPy 2.0)
-    if not hasattr(np, 'NaN'):
-        np.NaN = np.nan
-        dependency_logger.info("✅ [GITHUB] NumPy.NaN alias created for compatibility.")
-except ImportError as e:
-    dependency_logger.error(f"❌ Critical: numpy import failed: {e}")
-    sys.exit(1) # Esce se numpy non può essere importato
-
 if os.environ.get('GITHUB_ACTIONS') == 'true':
     dependency_logger.info("[GITHUB] 🔧 Comprehensive dependency fix starting...")
     
@@ -6721,34 +6710,45 @@ class IntegratedRevolutionaryTradingEngine:
     # In trading_engine_backtest.py, sostituisci run_integrated_trading_session
 
     # In trading_engine_backtest.py, sostituisci di nuovo l'INTERA funzione
-    # con questa versione che include la correzione e i log di debug.
-
-    # In trading_engine_backtest.py, sostituisci la funzione
+# con questa versione che include la correzione e i log di debug.
 
     def run_integrated_trading_session_for_backtest(self, analysis_data_path, sp500_data_full, current_backtest_date):
         """
         Versione per il backtest della sessione di trading.
-        La registrazione dei trade ora viene gestita dall'orchestratore PRIMA di chiamare questa funzione.
+        Accetta dati e stato come argomenti e non gestisce file di stato del portafoglio.
+        INCLUDE LOG DI DEBUG PER VERIFICARE LA GENERAZIONE DEI SEGNALI.
         """
         try:
             self.logger.info(f"--- Esecuzione Sessione di Trading (Backtest) per il {current_backtest_date.strftime('%Y-%m-%d')} ---")
             
-            # 1. Caricamento dati di analisi (la registrazione dei trade è già avvenuta)
+            # 1. Caricamento dati di analisi
             self.analysis_data_file = Path(analysis_data_path)
             analysis_data = self.load_analysis_data()
             if not analysis_data:
                 self.logger.error("Dati di analisi non disponibili, sessione terminata.")
                 return False
             
+            # ==============================================================================
+            # --- LOG DI DEBUG #1: VERIFICA PARAMETRI ATTIVI ---
+            self.logger.info(f"[DEBUG LOG] Parametri attivi per oggi: ROI Min={self.min_roi_threshold:.1f}%, RSI Oversold<={self.rsi_oversold}")
+            # ==============================================================================
+    
             # 2. Rileva il trend di mercato
             sp500_data_slice = sp500_data_full.loc[:current_backtest_date]
+    
+            # >>> LA CORREZIONE È QUI <<<
+            # Stiamo chiamando la funzione 'detect_overall_market_trend' che ora accetta i dati.
             overall_market_trend_today = self.detect_overall_market_trend(sp500_data_slice) 
-            self.last_overall_trend = overall_market_trend_today
+            
+            if overall_market_trend_today != 'unknown':
+                self.last_overall_trend = overall_market_trend_today
             
             max_pos_for_regime = self.max_positions_per_regime.get(self.last_overall_trend, 8)
             max_positions_allowed_today = min(self.max_simultaneous_positions, max_pos_for_regime)
-            
-            # 3. Logica di apprendimento AI
+            self.logger.info(f"[DEBUG LOG] Regime di mercato: {self.last_overall_trend.upper()}. Max posizioni consentite: {max_positions_allowed_today}")
+    
+            # 3. Logica di apprendimento AI (il DB AI viene letto/scritto qui)
+            # Questa parte rimane invariata.
             if self.ai_enabled and self.meta_orchestrator:
                 try:
                     with sqlite3.connect(self.meta_orchestrator.performance_learner.db_path) as conn:
@@ -6756,28 +6756,44 @@ class IntegratedRevolutionaryTradingEngine:
                         self.current_closed_ai_trades = cursor.fetchone()[0]
                 except Exception:
                     self.current_closed_ai_trades = 0
-                
+    
                 new_closed_trades_count = self.current_closed_ai_trades - self.total_closed_trades_at_last_ai_training
-                if ((current_backtest_date - self.last_ai_training_date).days >= self.ai_training_frequency_days or
+                if (not self.meta_orchestrator.performance_learner.is_trained or
+                    (current_backtest_date - self.last_ai_training_date).days >= self.ai_training_frequency_days or
                     new_closed_trades_count >= self.ai_training_frequency_new_closed_trades):
                     
-                    self.logger.info(f"--- Tentativo di training AI in corso (Gioni dall'ultimo: {(current_backtest_date - self.last_ai_training_date).days}, Nuovi Trade: {new_closed_trades_count}) ---")
+                    self.logger.info("--- Tentativo di training AI in corso... ---")
                     if self.meta_orchestrator.performance_learner.train_model():
                         self.last_ai_training_date = current_backtest_date
                         self.total_closed_trades_at_last_ai_training = self.current_closed_ai_trades
             
             # 4. Generazione segnali
+            self.logger.info("Inizio generazione segnali Ensemble...")
             buy_signals_map = self.generate_ensemble_signals(analysis_data)
-            sell_signals_map = self.generate_sell_signals(analysis_data, is_backtest=True)
+            sell_signals_map = self.generate_sell_signals(analysis_data)
             
+            # ==============================================================================
+            # --- LOG DI DEBUG #2: VERIFICA OUTPUT SEGNALI ---
+            self.logger.info(f"[DEBUG LOG] Segnali generati dall'Ensemble: {len(buy_signals_map)} acquisti, {len(sell_signals_map)} vendite.")
+            if buy_signals_map:
+                # Stampa i primi 3 segnali di acquisto per vedere i loro punteggi
+                for i, (ticker, signal) in enumerate(list(buy_signals_map.items())[:3]):
+                    roi = signal.get('ref_score_or_roi', 0)
+                    self.logger.info(f"  -> Esempio Segnale Acquisto: {ticker}, ROI Atteso: {roi:.2f}%")
+            # ==============================================================================
+    
+            # 5. Prepara i segnali per l'esportazione JSON
             prepared_buys, prepared_sells = self.prepare_signals_for_json_export(
-                buy_signals_map, sell_signals_map, max_positions_allowed_today
+                buy_signals_map,
+                sell_signals_map,
+                max_positions_allowed_today
             )
     
+            # 6. Salva i segnali nel file che l'orchestratore leggerà
             EXECUTION_SIGNALS_FILE = DATA_DIR / "execution_signals.json"
             self.save_signals_for_executor(prepared_buys, prepared_sells, EXECUTION_SIGNALS_FILE)
             
-            self.logger.info(f"--- Sessione di Trading (Backtest) completata con successo ---")
+            self.logger.info(f"--- Sessione di Trading (Backtest) completata per il {current_backtest_date.strftime('%Y-%m-%d')} ---")
             return True
             
         except Exception as e:
@@ -6785,8 +6801,6 @@ class IntegratedRevolutionaryTradingEngine:
             import traceback
             self.logger.error(traceback.format_exc())
             return False
-
-    
     
 # === MAIN EXECUTION ===
 
