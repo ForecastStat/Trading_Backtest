@@ -36,7 +36,7 @@ except ImportError as e:
 
 # --- CONFIGURAZIONE GLOBALE ---
 START_DATE = '2015-01-01'
-END_DATE = '2015-12-31'
+END_DATE = '2015-06-30'
 INITIAL_CAPITAL = 100000.0
 
 BASE_DIR = Path.cwd()
@@ -121,13 +121,32 @@ def execute_signals_for_day(signals, all_historical_data, current_date, capital,
             entry_price = float(all_historical_data[ticker].loc[current_date_str]['Open'])
             quantity = buy_signal.get('quantity_estimated', 0)
             trade_value = entry_price * quantity
+            
             if capital >= trade_value and quantity > 0:
                 capital -= trade_value
-                open_positions.append({
-                    'ticker': ticker, 'entry_price': entry_price, 'quantity': quantity, 'trade_value': trade_value,
-                    'entry_date': current_date, 'stop_loss': buy_signal.get('stop_loss'), 'take_profit': buy_signal.get('take_profit')
-                })
+                
+                # Creiamo il dizionario della posizione usando TUTTI i nomi delle chiavi
+                # necessari, sia per l'orchestratore che per l'engine, per evitare errori.
+                new_position = {
+                    # Chiavi che la funzione di vendita dell'engine si aspetta:
+                    'entry': entry_price,
+                    'date': current_date.isoformat(), # Formato stringa standard
+                    'quantity': quantity,
+                    'amount_invested': trade_value,
+                    
+                    # Chiavi che il resto dell'orchestratore potrebbe usare (le manteniamo):
+                    'ticker': ticker,
+                    'entry_price': entry_price,
+                    'trade_value': trade_value,
+                    'entry_date': current_date, # Oggetto datetime
+                    'stop_loss': buy_signal.get('stop_loss'),
+                    'take_profit': buy_signal.get('take_profit')
+                }
+                
+                open_positions.append(new_position)
                 logging.info(f"      ✅ ACQUISTATO: {quantity} {ticker} @ ${entry_price:.2f}")
+            
+            
             elif quantity > 0:
                 logging.warning(f"      ⚠️ ACQUISTO SALTATO: {ticker} - Capitale insufficiente.")
         except Exception as e:
