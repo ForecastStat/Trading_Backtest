@@ -32,7 +32,7 @@ except ImportError as e:
 
 # --- CONFIGURAZIONE DEL BACKTEST ---
 START_DATE = '2015-01-01'
-END_DATE = '2015-06-30'
+END_DATE = '2015-03-31'
 INITIAL_CAPITAL = 100000.0
 
 BASE_DIR = Path.cwd()
@@ -48,22 +48,63 @@ EXECUTION_SIGNALS_FILE = SIGNALS_DIR / "execution_signals.json"
 HISTORICAL_EXECUTION_SIGNALS_FILE = SIGNALS_DIR / "historical_execution_signals.json"
 
 def setup_backtest_environment():
-    """FASE 1: Setup dell'ambiente di backtest"""
+    """
+    FASE 1: Setup dell'ambiente di backtest (versione per GitHub Actions).
+    Questa versione è "non distruttiva": crea le cartelle se non esistono
+    e pulisce solo i file di output della sessione, preservando i file
+    che devono persistere tra le esecuzioni (come il DB dell'AI).
+    """
     print("FASE 1: Setup dell'ambiente di backtest...")
-    if DATA_DIR.exists():
-        shutil.rmtree(DATA_DIR)
-        print("  - Rimossa directory backtest esistente")
-    
-    # Crea tutte le directory necessarie
+
+    # 1. Crea tutte le directory necessarie in modo sicuro.
+    #    `exist_ok=True` previene errori se le cartelle esistono già.
+    #    Questo garantisce che la struttura delle cartelle sia sempre corretta.
     for directory in [DATA_DIR, AI_LEARNING_DIR, REPORTS_DIR, SIGNALS_HISTORY_DIR, SIGNALS_DIR]:
         directory.mkdir(parents=True, exist_ok=True)
-        print(f"  - Creata directory: {directory}")
-    
-    # Inizializza il database AI vuoto
-    AI_DB_FILE.touch()
-    print(f"  - Inizializzato database AI: {AI_DB_FILE}")
-    
-    # Inizializza il file dei segnali storici
+        print(f"  - Assicurata esistenza directory: {directory}")
+
+    # 2. Pulisci i file di output vecchi che devono essere rigenerati ad ogni esecuzione.
+    #    Questo previene che lo script legga dati "sporchi" di un'esecuzione precedente.
+    if ANALYSIS_FILE_PATH.exists():
+        os.remove(ANALYSIS_FILE_PATH)
+        print(f"  - Rimosso vecchio file di analisi: {ANALYSIS_FILE_PATH}")
+    if EXECUTION_SIGNALS_FILE.exists():
+        os.remove(EXECUTION_SIGNALS_FILE)
+        print(f"  - Rimosso vecchio file di segnali: {EXECUTION_SIGNALS_FILE}")
+    # Aggiungi qui altri file da pulire se necessario.
+
+    # 3. Inizializza il database AI solo se NON esiste.
+    #    Se la cache di GitHub Actions lo ha ripristinato, questo file esisterà già
+    #    e questo blocco di codice verrà saltato, preservando i dati.
+    if not AI_DB_FILE.exists():
+        # Crea una connessione per inizializzare il file e la tabella.
+        # Questo è più robusto di un semplice .touch().
+        try:
+            conn = sqlite3.connect(AI_DB_FILE)
+            # Aggiungiamo una query di creazione tabella base per assicurarci
+            # che il DB non sia solo vuoto, ma anche strutturato correttamente.
+            # Il trading_engine farà il resto.
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY,
+                    unique_trade_id TEXT UNIQUE
+                )
+            ''')
+            conn.close()
+            print(f"  - Creato nuovo database AI (non trovato): {AI_DB_FILE}")
+        except Exception as e:
+            print(f"  - ERRORE nella creazione del DB AI: {e}")
+    else:
+        print(f"  - Database AI trovato (probabilmente da cache GitHub): {AI_DB_FILE}")
+        # Opzionale: Stampiamo la dimensione del file per conferma
+        try:
+            db_size = AI_DB_FILE.stat().st_size
+            print(f"    -> Dimensione DB: {db_size} bytes.")
+        except:
+            pass # Ignora errori se non si può leggere la dimensione
+
+    # 4. Inizializza sempre il file dei segnali storici (questo è corretto,
+    #    perché contiene solo i segnali dell'esecuzione corrente).
     with open(HISTORICAL_EXECUTION_SIGNALS_FILE, 'w') as f:
         json.dump({"historical_signals": [], "last_updated": "", "total_signals": 0}, f, indent=2)
     print(f"  - Inizializzato file segnali storici: {HISTORICAL_EXECUTION_SIGNALS_FILE}")
