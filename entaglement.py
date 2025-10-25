@@ -32,6 +32,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 import os
 import random
+import requests
 
 # ---------------------------
 # Utility math
@@ -84,9 +85,14 @@ def compute_qmutual_from_data(XA, XB, gamma=None):
 # ---------------------------
 
 def fetch_sp500_tickers():
-    # prendo la lista da Wikipedia
+    # prendo la lista da Wikipedia con User-Agent appropriato
     url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    tables = pd.read_html(url)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    tables = pd.read_html(response.text)
     df = tables[0]
     tickers = df['Symbol'].tolist()
     # alcuni ticker hanno punti (es BRK.B) che yfinance vuole come BRK-B
