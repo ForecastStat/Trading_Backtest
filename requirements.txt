@@ -8,3 +8,5 @@ python-dotenv
 joblib
 tqdm
 matplotlib
+lxml
+html5lib
